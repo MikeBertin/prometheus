@@ -87,7 +87,8 @@ accumulator. Norms, the KV cache and everything between ops stay fp32.
 
 matmul is memory-bandwidth-bound, so 1-byte weights ≈ 4× less traffic:
 the Shakespeare model drops 9.1→2.4 MB and roughly doubles in speed;
-stories15M drops 60.8→17.1 MB.
+stories15M drops 60.8→17.1 MB. The live demo serves the quantized model —
+that 2.4 MB download is what's generating in your browser.
 
 ```sh
 .venv/bin/python src/export.py models/ckpt.pt models/shakespeare_q80.bin --q80

@@ -17,8 +17,15 @@
 
 #include <emscripten.h>
 
+/* Compile against either engine — they expose identical internals.
+ * -DPROMETHEUS_Q selects the int8 runq.c (what the live site ships:
+ * 2.4 MB of weights instead of 9.1, and ~2x the tok/s). */
 #define PROMETHEUS_LIB
+#ifdef PROMETHEUS_Q
+#include "runq.c"
+#else
 #include "run.c"
+#endif
 
 static Transformer T;
 static Tokenizer TOK;

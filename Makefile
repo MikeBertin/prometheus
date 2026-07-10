@@ -49,15 +49,16 @@ train:
 	.venv/bin/python src/tokenizer_export.py models/byte_tokenizer.bin
 	.venv/bin/python src/train.py --iters 750 --out models/shakespeare.bin --ckpt models/ckpt.pt
 
-# WASM build for the web demo: the same run.c, compiled to WebAssembly.
-web: src/web_api.c src/run.c
-	emcc -O3 -msimd128 -ffast-math src/web_api.c -o web/prometheus.js \
+# WASM build for the web demo: the int8 engine (runq.c) + quantized weights.
+# (Drop -DPROMETHEUS_Q and swap the .bin to serve the fp32 engine instead.)
+web: src/web_api.c src/run.c src/runq.c
+	emcc -O3 -msimd128 -ffast-math -DPROMETHEUS_Q src/web_api.c -o web/prometheus.js \
 	  -sMODULARIZE=1 -sEXPORT_NAME=Prometheus \
 	  -sEXPORTED_RUNTIME_METHODS=cwrap,FS \
 	  -sALLOW_MEMORY_GROWTH=1 -sENVIRONMENT=web \
 	  --no-entry
 	mkdir -p web/models
-	cp models/shakespeare.bin models/byte_tokenizer.bin web/models/
+	cp models/shakespeare.bin models/shakespeare_q80.bin models/byte_tokenizer.bin web/models/
 
 clean:
 	rm -f $(BIN) $(QBIN)

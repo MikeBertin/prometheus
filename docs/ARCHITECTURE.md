@@ -148,6 +148,11 @@ Export: `export.py --q80` writes the v2 "ak42" format (256-byte header with
 `[int8 q][fp32 scales]`). It accepts either `ckpt.pt` **or a legacy fp32
 .bin** — so stories15M can be quantized without its original checkpoint.
 
+The web demo now ships this engine: `make web` compiles `web_api.c` with
+`-DPROMETHEUS_Q` (which includes runq.c instead of run.c — identical
+internals) and the page fetches `shakespeare_q80.bin` (2.4 MB vs 9.1).
+Walkthrough steps 16–17 cover Q8_0 and the row-alignment war story.
+
 **The gotcha that cost an hour**: groups must align with matrix *rows*.
 runq.c's matmul indexes a weight's scales as `(row*n + j)/GS`, valid only if
 GS divides every row length (dim *and* hidden_dim). stories15M has dim=288 —

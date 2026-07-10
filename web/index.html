@@ -211,12 +211,13 @@
         <h1>A transformer language model, written from scratch in C —<br><span class="g">generating in your browser.</span></h1>
         <p class="sub">~600 lines of hand-written C: RMSNorm, rotary embeddings, multi-head attention with a KV
           cache, SwiGLU, a byte-level tokenizer and a top-p sampler. The model below was <em>trained from
-          random weights</em> on the complete works of Shakespeare, exported to a flat binary, and the same
-          C file — compiled to WebAssembly — is running it live. No libraries, no frameworks, no API calls.</p>
+          random weights</em> on the complete works of Shakespeare, <em>int8-quantized</em> down to 2.4 MB,
+          and the same C engine — compiled to WebAssembly — is running it live. No libraries, no
+          frameworks, no API calls.</p>
 
         <div class="crt">
           <div class="crt-bar"><i class="r"></i><i class="y"></i><i class="g"></i>
-            <span>run.c · 2.26M params · fp32</span><span class="tps" id="tps"></span></div>
+            <span>runq.c · 2.26M params · int8</span><span class="tps" id="tps"></span></div>
           <div class="presets" id="presets">
             <button data-p="ROMEO:">ROMEO:</button>
             <button data-p="JULIET:">JULIET:</button>
@@ -231,7 +232,7 @@
               <span id="tval">0.8</span></label>
             <button class="primary" id="go" disabled>▶ generate</button>
           </div>
-          <div class="crt-screen"><pre id="out"><span class="loading">loading 9 MB of weights…</span></pre></div>
+          <div class="crt-screen"><pre id="out"><span class="loading">loading 2.4 MB of int8 weights…</span></pre></div>
         </div>
         <p class="hint">Each speech <em>ends itself</em>: the model emits its beginning-of-sequence token when
           it thinks the speaker block is done — it learned that from where BOS sat in the training data.
@@ -618,6 +619,56 @@ for layer in model.layers: serialize_fp32(f, layer.attention.wq.weight)
 # the exact order memory_map_weights() walks. This order IS the format.</code></pre></div>
         </div>
 
+        <div class="phase-row"><span class="label">Quantization</span></div>
+
+        <div class="step" id="s16" data-n="16" data-phase="quant">
+          <header>
+            <span class="tag">16 · int8</span>
+            <h3>Four bytes into one</h3>
+            <p>Step 06 said matmul is where all the time goes — but it's not the <em>multiplies</em>, it's
+              streaming the weight bytes from memory. So: store each weight as an int8 plus one fp32
+              <span class="term" data-tip="Q8_0: per group of consecutive values, scale = max|w|/127, then q = round(w/scale). Symmetric, group-wise — one outlier only poisons its own group.">scale
+              per group of 64</span>, quantize the activations on the fly, and run the inner loop in pure
+              integer arithmetic. 4× less memory traffic, 4× smaller file. What stays fp32: the norms, the KV
+              cache, everything between ops — precision where it's cheap, bytes saved where it's expensive.</p>
+            <p>This isn't hypothetical: the engine generating above is <em>runq.c</em>, and the 2.4 MB you
+              downloaded (instead of 9.1) is the quantized checkpoint.</p>
+          </header>
+          <div class="code-wrap"><span class="file">src/runq.c — quantize() + matmul()</span>
+          <pre><code data-lang="c">// activations -&gt; int8, one scale per group, right before each matmul
+float scale = wmax / 127.0f;
+qx-&gt;q[i] = (int8_t)roundf(x[i] / scale);
+
+// the payoff: the hot loop is integer multiplies with an int32 accumulator
+for (int j = 0; j &lt;= n - GS; j += GS) {
+    int32_t ival = 0;
+    for (int k = 0; k &lt; GS; k++)
+        ival += ((int32_t)x-&gt;q[j + k]) * ((int32_t)w-&gt;q[in + j + k]);
+    val += ((float)ival) * w-&gt;s[(in + j) / GS] * x-&gt;s[j / GS];  // scales, once
+}</code></pre></div>
+        </div>
+
+        <div class="step" id="s17" data-n="17" data-phase="quant">
+          <header>
+            <span class="tag">17 · a war story</span>
+            <h3>The bug that spoke in tongues</h3>
+            <p>First int8 run of a dim-288 model: fluent English with random exotic tokens sprinkled in —
+              <em>"there was a little girl named<b>opts</b>a"</em>. Cause: 288 isn't divisible by the group
+              size 64, so quantization groups straddled matrix rows and every <em>odd</em> row read its
+              neighbour's scales. Half the vocabulary's logits corrupted, half perfect — a model that's
+              simultaneously right and wrong. Our Shakespeare model (dims 192/512) masked the bug completely.</p>
+            <p>The lesson quantized models teach: they fail <em>eloquently</em>. Nothing crashes; the text
+              just gets strange. The fix is one invariant — groups must align with rows — enforced twice:</p>
+          </header>
+          <div class="code-wrap"><span class="file">src/export.py + src/runq.c — the invariant, both sides</span>
+          <pre><code data-lang="py"># export.py: shrink the group size until it divides every row length
+while cfg["dim"] % gs != 0 or cfg["hidden_dim"] % gs != 0:
+    gs //= 2
+
+# runq.c: and refuse loudly rather than generate beautifully wrong text
+# if (config-&gt;dim % GS != 0 || config-&gt;hidden_dim % GS != 0) exit(1);</code></pre></div>
+        </div>
+
       </div>
 
       <footer>
@@ -662,7 +713,7 @@ for layer in model.layers: serialize_fp32(f, layer.attention.wq.weight)
     (async () => {
       try {
         const [model, tok] = await Promise.all([
-          fetchWithProgress("models/shakespeare.bin?v=1", "fetching weights…"),
+          fetchWithProgress("models/shakespeare_q80.bin?v=1", "fetching weights…"),
           fetch("models/byte_tokenizer.bin?v=1").then(r => r.arrayBuffer())
             .then(b => new Uint8Array(b)),
         ]);
@@ -739,7 +790,7 @@ for layer in model.layers: serialize_fp32(f, layer.attention.wq.weight)
     promptEl.addEventListener("keydown", e => { if (e.key === "Enter") generate(); });
 
     // ── sidebar nav, scroll-spy, reveal, progress, copy, highlighter ─────
-    const PHASES = { loop:"The Loop", fwd:"Forward Pass", txt:"Text ⇄ Tokens", train:"Training" };
+    const PHASES = { loop:"The Loop", fwd:"Forward Pass", txt:"Text ⇄ Tokens", train:"Training", quant:"Quantization" };
     const nav = $("nav");
     let curPhase = null;
     document.querySelectorAll(".step").forEach(step => {
