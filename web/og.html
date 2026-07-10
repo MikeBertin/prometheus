@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>og card</title>
+<style>
+  /* 1200x630 static OG card — captured headless, never linked from the page */
+  * { box-sizing:border-box; margin:0; }
+  body { width:1200px; height:630px; overflow:hidden; position:relative;
+    background:
+      radial-gradient(900px 500px at 85% -10%, #2b1808 0%, transparent 60%),
+      radial-gradient(700px 450px at -5% 30%, #221016 0%, transparent 55%),
+      #0d0a08;
+    color:#e0d6c8; font:15px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace;
+    display:flex; align-items:center; gap:46px; padding:0 64px; }
+  .left { flex:1.05; }
+  .flame { font-size:30px; letter-spacing:.5px; margin-bottom:18px; color:#8a7f6b; }
+  .flame b { color:#ffa657; font-size:31px; }
+  h1 { font-size:44px; line-height:1.22; letter-spacing:.3px; color:#f5ead7; margin-bottom:18px; }
+  h1 .g { background:linear-gradient(90deg,#ffa657,#e3b341);
+    -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .sub { color:#a99c85; font-size:19px; line-height:1.65; max-width:30ch; margin-bottom:26px; }
+  .chips { display:flex; flex-wrap:wrap; gap:9px; max-width:480px; }
+  .chip { border:1px solid #3a2d1c; border-radius:999px; padding:5px 14px;
+    color:#c9b697; font-size:14.5px; background:#171208; }
+  .chip.hot { color:#ffa657; border-color:#bb6528; }
+  .crt { flex:1; background:#000; border:1px solid #3a2d1c; border-radius:12px;
+    overflow:hidden; box-shadow:0 40px 90px -30px #000, inset 0 0 110px -40px #bb6528; }
+  .bar { display:flex; align-items:center; gap:9px; padding:13px 16px;
+    background:linear-gradient(#241a10,#170f08); border-bottom:1px solid #3a2d1c; }
+  .bar i { width:13px; height:13px; border-radius:50%; }
+  .bar .r{background:#ff5f56} .bar .y{background:#ffbd2e} .bar .g{background:#27c93f}
+  .bar span { color:#8a7f6b; font-size:14px; margin-left:8px; }
+  .bar .tps { margin-left:auto; color:#ffa657; font-size:14px; }
+  .screen { padding:22px 24px 26px; font-size:19px; line-height:1.62; color:#f3e9d5;
+    position:relative; min-height:300px; white-space:pre-line; }
+  .screen::after { content:""; position:absolute; inset:0; pointer-events:none;
+    background:repeating-linear-gradient(#0000 0 2px, #ffffff08 2px 3px); }
+  .screen .p { color:#ffa657; font-weight:700; }
+  .cursor { display:inline-block; width:10px; height:21px; background:#ffa657;
+    vertical-align:text-bottom; }
+</style>
+</head>
+<body>
+  <div class="left">
+    <div class="flame">🔥 <b>PROMETHEUS</b></div>
+    <h1>A language model from scratch in C, <span class="g">running in your browser.</span></h1>
+    <p class="sub">The full transformer forward pass, hand-written and annotated — trained on Shakespeare, compiled to WASM.</p>
+    <div class="chips">
+      <span class="chip hot">~600 lines of C</span>
+      <span class="chip">RMSNorm · RoPE · SwiGLU</span>
+      <span class="chip">attention + KV cache</span>
+      <span class="chip">zero libraries</span>
+      <span class="chip hot">2.26M params, self-trained</span>
+    </div>
+  </div>
+  <div class="crt">
+    <div class="bar"><i class="r"></i><i class="y"></i><i class="g"></i>
+      <span>run.c · fp32 · wasm</span><span class="tps">788 tok/s</span></div>
+    <div class="screen"><span class="p">ROMEO:</span>
+No fear me for my soul, I cannot for my face;
+But I have seen to see how some secure
+At that he makes the excellent fair devotion,
+I charge thee to be found in a man,
+Where is my side by my fortune beloved,
+That I will defend my blood that my soul, <span class="cursor"></span></div>
+  </div>
+</body>
+</html>

@@ -1,0 +1,53 @@
+# PROMETHEUS — llama2-style transformer inference in pure C
+#
+#   make            -> optimized build (use this to actually run models)
+#   make debug      -> -O0 -g with sanitizers, for debugging the math
+#   make demo       -> build + run the stories15M model with a prompt
+#   make bard       -> build + run OUR OWN trained model (Phase 2)
+#   make train      -> train + export the Shakespeare model (needs .venv)
+#   make clean
+
+CC      = cc
+CFLAGS  = -O3 -ffast-math -march=native -funroll-loops -Wall -Wextra
+LDFLAGS = -lm
+SRC     = src/run.c
+BIN     = run
+
+MODEL   = models/stories15M.bin
+TOKEN   = models/tokenizer.bin
+
+.PHONY: all debug demo bard train web clean
+
+all: $(BIN)
+
+$(BIN): $(SRC)
+	$(CC) $(CFLAGS) $(SRC) -o $(BIN) $(LDFLAGS)
+
+# Debug build: no fast-math, full warnings, address+UB sanitizers.
+debug: $(SRC)
+	$(CC) -O0 -g -Wall -Wextra -fsanitize=address,undefined $(SRC) -o $(BIN) $(LDFLAGS)
+
+demo: $(BIN)
+	./$(BIN) $(MODEL) -z $(TOKEN) -t 0.9 -i "Once upon a time"
+
+# Phase 2: our own weights, trained by src/train.py, byte-level tokenizer.
+bard: $(BIN)
+	./$(BIN) models/shakespeare.bin -z models/byte_tokenizer.bin -t 0.8 -i "ROMEO:"
+
+train:
+	.venv/bin/python src/tokenizer_export.py models/byte_tokenizer.bin
+	.venv/bin/python src/train.py --iters 750 --out models/shakespeare.bin --ckpt models/ckpt.pt
+
+# WASM build for the web demo: the same run.c, compiled to WebAssembly.
+web: src/web_api.c src/run.c
+	emcc -O3 -msimd128 -ffast-math src/web_api.c -o web/prometheus.js \
+	  -sMODULARIZE=1 -sEXPORT_NAME=Prometheus \
+	  -sEXPORTED_RUNTIME_METHODS=cwrap,FS \
+	  -sALLOW_MEMORY_GROWTH=1 -sENVIRONMENT=web \
+	  --no-entry
+	mkdir -p web/models
+	cp models/shakespeare.bin models/byte_tokenizer.bin web/models/
+
+clean:
+	rm -f $(BIN)
+	rm -rf *.dSYM

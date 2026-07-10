@@ -1,0 +1,824 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PROMETHEUS — a language model from scratch in C, running in your browser</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<meta name="description" content="A Llama-style transformer written from scratch in pure C — trained on Shakespeare, compiled to WebAssembly, generating live in your browser. Every line of the forward pass, annotated.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="PROMETHEUS — an LLM from scratch in C, generating in your browser">
+<meta property="og:description" content="RMSNorm, RoPE, attention, a KV cache and a sampler — ~600 lines of hand-written C, running a self-trained 2.26M-parameter Shakespeare model live via WASM.">
+<meta property="og:url" content="https://mikebertin.github.io/prometheus/">
+<meta property="og:image" content="https://mikebertin.github.io/prometheus/og.png">
+<meta name="twitter:card" content="summary_large_image">
+<style>
+  :root {
+    --bg:#0d0a08; --bg2:#131009; --panel:#171208; --ink:#e0d6c8; --muted:#8a7f6b;
+    --accent:#ffa657; --accent-dim:#bb6528; --border:#2a2115; --border2:#3a2d1c;
+    --amber:#e3b341; --blue:#79c0ff; --red:#ff7b72; --green:#7ee787;
+    --violet:#d2a8ff; --code-bg:#100c07;
+  }
+  * { box-sizing:border-box; }
+  html { scroll-behavior:smooth; }
+  body { margin:0; background:
+      radial-gradient(1200px 600px at 80% -10%, #241407 0%, transparent 60%),
+      radial-gradient(900px 500px at -10% 20%, #1c0f14 0%, transparent 55%),
+      var(--bg);
+    color:var(--ink); font:15px/1.6 ui-monospace,SFMono-Regular,Menlo,monospace; }
+  a { color:var(--accent); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+
+  #progress { position:fixed; top:0; left:0; height:2px; width:0;
+    background:linear-gradient(90deg,var(--accent),var(--amber)); z-index:60;
+    box-shadow:0 0 8px var(--accent); transition:width .06s linear; }
+
+  .app { display:grid; grid-template-columns:280px minmax(0,1fr); gap:0;
+    max-width:1240px; margin:0 auto; }
+
+  /* ── sidebar ── */
+  .side { position:sticky; top:0; align-self:start; height:100vh;
+    display:flex; flex-direction:column; padding:26px 20px 18px;
+    border-right:1px solid var(--border); }
+  .brand { font-size:19px; font-weight:700; letter-spacing:.5px; margin:0 0 2px; }
+  .brand .p { color:var(--accent); }
+  .brand-sub { color:var(--muted); font-size:11px; margin:0 0 16px; }
+  .side .status { color:var(--muted); font-size:11.5px; margin-bottom:18px; }
+  .side .status .dot { color:var(--amber); }
+  .side .status.live .dot { color:var(--accent); animation:pulse 2s infinite; }
+  @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.35} }
+
+  nav { flex:1; overflow-y:auto; margin:0 -6px; padding:0 6px; }
+  nav::-webkit-scrollbar { width:6px; } nav::-webkit-scrollbar-thumb { background:var(--border2); border-radius:3px; }
+  .phase { font-size:10px; letter-spacing:1.5px; text-transform:uppercase;
+    color:var(--muted); margin:16px 8px 6px; opacity:.7; }
+  .phase:first-child { margin-top:0; }
+  nav a { display:flex; gap:9px; align-items:baseline; padding:5px 9px; border-radius:6px;
+    color:var(--muted); font-size:12.5px; line-height:1.35; text-decoration:none;
+    border-left:2px solid transparent; transition:.15s; }
+  nav a .num { color:var(--border2); font-size:11px; min-width:16px; transition:.15s; }
+  nav a:hover { color:var(--ink); background:#1c150c; text-decoration:none; }
+  nav a.active { color:var(--accent); border-left-color:var(--accent); background:#1d1409; }
+  nav a.active .num { color:var(--accent); }
+
+  .side-foot { display:flex; gap:8px; align-items:center; padding-top:14px;
+    border-top:1px solid var(--border); margin-top:8px; font-size:12px; color:var(--muted); }
+  button { background:var(--panel); color:var(--ink); border:1px solid var(--border2);
+    border-radius:6px; padding:6px 12px; font:inherit; font-size:12px; cursor:pointer; transition:.15s; }
+  button:hover:not(:disabled) { border-color:var(--muted); color:#fff; }
+  button:disabled { opacity:.4; cursor:default; }
+  button.primary { background:linear-gradient(180deg,#3a2410,#2a1a0b); border-color:var(--accent-dim); color:var(--accent); font-weight:700; }
+  button.primary:hover:not(:disabled) { border-color:var(--accent); box-shadow:0 0 14px -4px var(--accent); color:#ffc38a; }
+
+  /* ── main ── */
+  main { padding:40px 42px 90px; min-width:0; }
+  .hero h1 { font-size:29px; margin:0 0 10px; letter-spacing:.3px; line-height:1.18; }
+  .hero h1 .g { background:linear-gradient(90deg,var(--accent),var(--amber));
+    -webkit-background-clip:text; background-clip:text; color:transparent; }
+  .hero .sub { color:var(--muted); font-size:14px; max-width:72ch; margin:0 0 22px; }
+  .hero .sub em { color:var(--ink); font-style:normal; }
+
+  /* the live terminal */
+  .crt { background:#000; border:1px solid var(--border2); border-radius:9px;
+    overflow:hidden; box-shadow:0 24px 70px -28px #000, 0 0 0 1px #000,
+      inset 0 0 90px -30px var(--accent-dim); }
+  .crt-bar { display:flex; align-items:center; gap:8px; padding:9px 13px;
+    background:linear-gradient(#241a10,#170f08); border-bottom:1px solid var(--border2); }
+  .crt-bar i { width:11px; height:11px; border-radius:50%; display:inline-block; }
+  .crt-bar .r{background:#ff5f56} .crt-bar .y{background:#ffbd2e} .crt-bar .g{background:#27c93f}
+  .crt-bar span { color:var(--muted); font-size:11.5px; margin-left:8px; }
+  .crt-bar .tps { margin-left:auto; color:var(--accent); font-size:11.5px; }
+
+  .controls { display:flex; flex-wrap:wrap; gap:10px; align-items:center;
+    padding:12px 14px; border-bottom:1px solid var(--border); background:#0d0906; }
+  .controls input[type=text] { flex:1; min-width:180px; background:var(--code-bg); color:var(--ink);
+    border:1px solid var(--border2); border-radius:6px; padding:7px 11px; font:inherit; font-size:13px; }
+  .controls input[type=text]:focus { outline:none; border-color:var(--accent-dim); }
+  .controls label { color:var(--muted); font-size:11.5px; display:flex; gap:7px; align-items:center; }
+  .controls input[type=range] { width:90px; accent-color:var(--accent); }
+  .presets { display:flex; gap:6px; padding:10px 14px 0; flex-wrap:wrap; }
+  .presets button { font-size:11px; padding:3px 9px; color:var(--muted); }
+  .presets button:hover { color:var(--accent); border-color:var(--accent-dim); }
+
+  .crt-screen { padding:16px 18px 20px; min-height:230px; position:relative; }
+  .crt-screen::after { content:""; position:absolute; inset:0; pointer-events:none;
+    background:repeating-linear-gradient(#0000 0 2px, #ffffff07 2px 3px); mix-blend-mode:overlay; opacity:.5; }
+  #out { white-space:pre-wrap; word-wrap:break-word; font:14.5px/1.55 ui-monospace,Menlo,monospace;
+    color:#f3e9d5; min-height:180px; margin:0; }
+  #out .prompt-echo { color:var(--accent); font-weight:700; }
+  #out .loading { color:var(--muted); }
+  #cursor { display:inline-block; width:8px; height:16px; background:var(--accent);
+    vertical-align:text-bottom; animation:blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity:0; } }
+  .hint { color:var(--muted); font-size:12.5px; margin:14px 0 0; max-width:74ch; }
+  .hint em { color:var(--accent); font-style:normal; }
+
+  /* ── walkthrough ── */
+  .wt-head { margin:60px 0 6px; }
+  .wt-head h2 { font-size:19px; margin:0 0 6px; }
+  .wt-head p { color:var(--muted); font-size:13px; margin:0; max-width:74ch; }
+
+  .timeline { position:relative; margin-top:26px; padding-left:34px; }
+  .timeline::before { content:""; position:absolute; left:9px; top:6px; bottom:40px;
+    width:2px; background:linear-gradient(var(--accent-dim),var(--border) 40%,var(--border)); }
+
+  .phase-row { position:relative; margin:30px 0 12px; }
+  .phase-row:first-child { margin-top:0; }
+  .phase-row .label { font-size:11px; letter-spacing:2px; text-transform:uppercase;
+    color:var(--accent); font-weight:700; }
+  .phase-row::before { content:""; position:absolute; left:-31px; top:3px; width:14px; height:14px;
+    border-radius:50%; background:var(--bg); border:2px solid var(--accent); box-shadow:0 0 10px -1px var(--accent); }
+
+  .step { position:relative; margin:16px 0; border:1px solid var(--border);
+    border-radius:10px; overflow:hidden; background:linear-gradient(180deg,var(--panel),#120d07);
+    opacity:0; transform:translateY(16px); transition:opacity .5s, transform .5s, border-color .18s, box-shadow .18s; }
+  .step.in { opacity:1; transform:none; }
+  .step:hover { border-color:var(--border2); box-shadow:0 0 0 1px var(--accent-dim), 0 16px 40px -26px var(--accent); }
+  .step::before { content:attr(data-n); position:absolute; left:-31px; top:16px; width:22px; height:22px;
+    display:grid; place-items:center; border-radius:50%; background:var(--bg2); border:1px solid var(--border2);
+    color:var(--muted); font-size:11px; transition:.18s; }
+  .step:hover::before { border-color:var(--accent); color:var(--accent); }
+  .step > header { padding:15px 18px 13px; }
+  .step .tag { font-size:10.5px; color:var(--accent); letter-spacing:1px; text-transform:uppercase; }
+  .step h3 { margin:5px 0 7px; font-size:16.5px; color:#f5ead7; }
+  .step p { margin:0; color:#a99c85; font-size:13.5px; }
+  .step p + p { margin-top:8px; }
+  .term { color:var(--ink); font-style:normal; border-bottom:1px dotted var(--muted);
+    cursor:help; position:relative; white-space:nowrap; }
+  .term:hover { color:var(--accent); border-bottom-color:var(--accent); }
+  .term::after { content:attr(data-tip); position:absolute; left:50%; bottom:150%; transform:translateX(-50%) translateY(4px);
+    background:#120d08; color:var(--ink); border:1px solid var(--border2); border-radius:7px;
+    padding:7px 10px; font-size:11.5px; line-height:1.45; white-space:normal; width:240px; text-align:left;
+    box-shadow:0 12px 30px -12px #000; opacity:0; pointer-events:none; transition:.16s; z-index:20; font-style:normal; }
+  .term:hover::after { opacity:1; transform:translateX(-50%) translateY(0); }
+
+  .code-wrap { position:relative; border-top:1px solid var(--border); }
+  .code-wrap .file { display:block; font-size:11.5px; color:var(--muted); padding:8px 16px 0; background:var(--code-bg); }
+  .copy { position:absolute; top:7px; right:9px; padding:3px 9px; font-size:10.5px;
+    opacity:0; transition:.16s; background:#1d150c; }
+  .code-wrap:hover .copy { opacity:1; }
+  .copy.done { color:var(--accent); border-color:var(--accent-dim); }
+  pre { margin:0; padding:8px 16px 16px; background:var(--code-bg); overflow-x:auto;
+    font:13px/1.55 ui-monospace,Menlo,monospace; }
+  code .c { color:#8a7f6b; font-style:italic; }
+  code .s { color:var(--amber); }
+  code .n { color:var(--blue); }
+  code .k { color:var(--red); }
+
+  .diagram { margin:16px 0; border:1px solid var(--border); border-radius:10px;
+    background:linear-gradient(180deg,#161009,#0f0b06); padding:20px 18px 14px;
+    opacity:0; transform:translateY(16px); transition:.5s; }
+  .diagram.in { opacity:1; transform:none; }
+  .diagram .cap { color:var(--muted); font-size:12px; text-align:center; margin:6px 0 0; }
+  .diagram svg { width:100%; height:auto; display:block; }
+  .dgm-txt { font:12px ui-monospace,Menlo,monospace; }
+
+  footer { margin:56px 0 0; color:var(--muted); font-size:12.5px; line-height:1.7;
+    border-top:1px solid var(--border); padding-top:22px; }
+
+  @media (max-width:900px) {
+    .app { grid-template-columns:1fr; }
+    .side { position:static; height:auto; flex-direction:row; flex-wrap:wrap; align-items:center;
+      border-right:none; border-bottom:1px solid var(--border); gap:12px 18px; }
+    .side .status { margin:0; } nav { flex-basis:100%; order:5; display:flex; flex-wrap:wrap; overflow:visible; }
+    .phase { display:none; } nav a { border-left:none; border-bottom:2px solid transparent; padding:4px 8px; }
+    nav a.active { background:none; border-bottom-color:var(--accent); }
+    .side-foot { border-top:none; padding-top:0; margin:0; }
+    main { padding:26px 18px 70px; }
+    .hero h1 { font-size:23px; }
+  }
+  @media (max-width:600px) { .side { padding:18px 16px; } nav { display:none; } }
+</style>
+</head>
+<body>
+  <div id="progress"></div>
+
+  <div class="app">
+    <aside class="side">
+      <div>
+        <p class="brand"><span class="p">🔥</span> PROMETHEUS</p>
+        <p class="brand-sub">a language model from scratch in C</p>
+        <p class="status" id="status"><span class="dot">●</span> fetching weights…</p>
+      </div>
+      <nav id="nav"></nav>
+      <div class="side-foot">
+        <span>2.26M params · pure C · WASM</span>
+      </div>
+    </aside>
+
+    <main>
+      <section class="hero">
+        <h1>A transformer language model, written from scratch in C —<br><span class="g">generating in your browser.</span></h1>
+        <p class="sub">~600 lines of hand-written C: RMSNorm, rotary embeddings, multi-head attention with a KV
+          cache, SwiGLU, a byte-level tokenizer and a top-p sampler. The model below was <em>trained from
+          random weights</em> on the complete works of Shakespeare, exported to a flat binary, and the same
+          C file — compiled to WebAssembly — is running it live. No libraries, no frameworks, no API calls.</p>
+
+        <div class="crt">
+          <div class="crt-bar"><i class="r"></i><i class="y"></i><i class="g"></i>
+            <span>run.c · 2.26M params · fp32</span><span class="tps" id="tps"></span></div>
+          <div class="presets" id="presets">
+            <button data-p="ROMEO:">ROMEO:</button>
+            <button data-p="JULIET:">JULIET:</button>
+            <button data-p="KING RICHARD II:">KING RICHARD II:</button>
+            <button data-p="First Citizen:">First Citizen:</button>
+            <button data-p="">(no prompt — let it invent)</button>
+          </div>
+          <div class="controls">
+            <input type="text" id="prompt" value="ROMEO:" spellcheck="false"
+              placeholder="type a prompt — speaker names work best">
+            <label>temp <input type="range" id="temp" min="0" max="1.4" step="0.1" value="0.8">
+              <span id="tval">0.8</span></label>
+            <button class="primary" id="go" disabled>▶ generate</button>
+          </div>
+          <div class="crt-screen"><pre id="out"><span class="loading">loading 9 MB of weights…</span></pre></div>
+        </div>
+        <p class="hint">Each speech <em>ends itself</em>: the model emits its beginning-of-sequence token when
+          it thinks the speaker block is done — it learned that from where BOS sat in the training data.
+          Temperature 0 is greedy and deterministic; crank it past 1.0 for chaos. Every token you see is a
+          <em>full forward pass</em> through all 5 transformer layers, in C, on your CPU.</p>
+      </section>
+
+      <div class="wt-head">
+        <h2>How it works — the actual code</h2>
+        <p>Every snippet below is really in the engine generating above. Follow one token through the machine:
+          from a file of floats, through the forward pass, out the sampler — and then how the weights got
+          trained in the first place.</p>
+      </div>
+
+      <div class="timeline" id="timeline">
+
+        <div class="phase-row"><span class="label">The Loop</span></div>
+
+        <div class="step" id="s1" data-n="01" data-phase="loop">
+          <header>
+            <span class="tag">01 · autoregression</span>
+            <h3>The whole thing is one loop</h3>
+            <p>A language model is a function from <em>tokens so far</em> to <em>a probability for every possible
+              next token</em>. Generation just calls it repeatedly: predict, sample, append, repeat. While your
+              prompt is still being fed in, the "next token" is forced to be your prompt; after that, the model
+              is on its own.</p>
+          </header>
+          <div class="code-wrap"><span class="file">src/run.c — generate()</span>
+          <pre><code data-lang="c">while (pos &lt; steps) {
+    float* logits = forward(t, token, pos);   // the whole network, once
+    next = (pos &lt; num_prompt_tokens - 1)
+         ? prompt_tokens[pos + 1]             // still feeding your prompt
+         : sample(s, logits);                 // now it's the model's turn
+    pos++;
+    if (next == 1) break;                     // it emitted BOS: it chose to stop
+    printf("%s", decode(tok, token, next));   // stream the piece out
+    token = next;
+}</code></pre></div>
+        </div>
+
+        <div class="step" id="s2" data-n="02" data-phase="loop">
+          <header>
+            <span class="tag">02 · the checkpoint</span>
+            <h3>A model is a file of floats</h3>
+            <p>The entire model is one flat binary: a 28-byte header of seven ints, then every weight matrix
+              as raw float32, in a fixed order. We <span class="term" data-tip="mmap lets the OS page the file into memory lazily — no giant malloc+read, and the weights are shared read-only.">mmap</span>
+              it and never copy: the "loaded model" is just pointers into the file.</p>
+          </header>
+          <div class="code-wrap"><span class="file">src/run.c — Config + read_checkpoint()</span>
+          <pre><code data-lang="c">typedef struct {
+    int dim;        // width of the residual stream   (192 here)
+    int hidden_dim; // feed-forward inner width       (512)
+    int n_layers;   // transformer blocks stacked     (5)
+    int n_heads;    // attention heads                (6)
+    int n_kv_heads; // key/value heads                (6 — no grouping)
+    int vocab_size; // distinct tokens                (259)
+    int seq_len;    // max context length             (256)
+} Config;
+
+fread(config, sizeof(Config), 1, file);   // the 28-byte header...
+*data = mmap(NULL, *file_size, PROT_READ, MAP_PRIVATE, *fd, 0);  // ...the rest</code></pre></div>
+        </div>
+
+        <div class="step" id="s3" data-n="03" data-phase="loop">
+          <header>
+            <span class="tag">03 · weight layout</span>
+            <h3>Laying pointers over the blob</h3>
+            <p>No deserialization — each weight tensor is found by walking a pointer through the mapped file in
+              the exact order the exporter wrote it. This ordering <em>is</em> the file format. One neat trick:
+              if the header's vocab_size is positive, the final classifier is
+              <span class="term" data-tip="Weight tying: the same (vocab × dim) matrix embeds tokens on the way in and scores them on the way out. Saves a third of this model's parameters.">tied</span>
+              to the embedding table — the same matrix used twice.</p>
+          </header>
+          <div class="code-wrap"><span class="file">src/run.c — memory_map_weights()</span>
+          <pre><code data-lang="c">w-&gt;token_embedding_table = ptr;  ptr += vocab_size * dim;
+w-&gt;rms_att_weight = ptr;         ptr += n_layers * dim;
+w-&gt;wq = ptr;                     ptr += n_layers * dim * dim;
+w-&gt;wk = ptr;                     ptr += n_layers * dim * kv_dim;
+// ...wv, wo, ffn norms, w1, w2, w3, final norm, in fixed order...
+w-&gt;wcls = shared_weights ? w-&gt;token_embedding_table  // tied: reuse it
+                         : ptr;                       // untied: it follows</code></pre></div>
+        </div>
+
+        <div class="phase-row"><span class="label">The Forward Pass</span></div>
+
+        <div class="step" id="s4" data-n="04" data-phase="fwd">
+          <header>
+            <span class="tag">04 · residual stream</span>
+            <h3>One vector, edited by every layer</h3>
+            <p>The spine of a transformer is the <span class="term" data-tip="A vector of size dim (192 here) that flows through the whole network — the model's running 'thought' about what comes next.">residual stream</span>
+              — the token's embedding, which each sub-layer reads, computes a correction to, and <em>adds back</em>.
+              Information is never overwritten, only edited. That additive structure is why deep transformers
+              train stably.</p>
+          </header>
+          <div class="code-wrap"><span class="file">src/run.c — forward()</span>
+          <pre><code data-lang="c">// x IS the model's running "thought" — start it as the token's embedding
+memcpy(x, w-&gt;token_embedding_table + token * dim, dim * sizeof(float));
+
+for (int l = 0; l &lt; p-&gt;n_layers; l++) {
+    // attention sub-layer: compute a correction from context...
+    matmul(s-&gt;xb2, s-&gt;xb, w-&gt;wo + l*dim*dim, dim, dim);
+    for (int i = 0; i &lt; dim; i++) x[i] += s-&gt;xb2[i];   // ...and ADD it
+
+    // feed-forward sub-layer: same pattern
+    for (int i = 0; i &lt; dim; i++) x[i] += s-&gt;xb[i];    // never overwrite</code></pre></div>
+        </div>
+
+        <div class="diagram" id="d-arch">
+          <svg viewBox="0 0 660 150" role="img" aria-label="transformer data flow">
+            <defs>
+              <marker id="arr" viewBox="0 0 8 8" refX="7" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+                <path d="M0 0 L8 4 L0 8 z" fill="#8a7f6b"/></marker>
+            </defs>
+            <g class="dgm-txt">
+              <rect x="8"  y="52" width="70" height="34" rx="6" fill="#100c07" stroke="#3a2d1c"/>
+              <text x="43" y="73" text-anchor="middle" fill="#a99c85">token id</text>
+              <rect x="110" y="52" width="66" height="34" rx="6" fill="#100c07" stroke="#3a2d1c"/>
+              <text x="143" y="73" text-anchor="middle" fill="#a99c85">embed</text>
+              <rect x="208" y="24" width="200" height="92" rx="8" fill="#171208" stroke="#bb6528"/>
+              <text x="308" y="14" text-anchor="middle" fill="#8a7f6b">× 5 layers</text>
+              <rect x="222" y="38" width="172" height="28" rx="5" fill="#100c07" stroke="#3a2d1c"/>
+              <text x="308" y="57" text-anchor="middle" fill="#ffa657">norm → attention → add</text>
+              <rect x="222" y="76" width="172" height="28" rx="5" fill="#100c07" stroke="#3a2d1c"/>
+              <text x="308" y="95" text-anchor="middle" fill="#e3b341">norm → SwiGLU → add</text>
+              <rect x="440" y="52" width="76" height="34" rx="6" fill="#100c07" stroke="#3a2d1c"/>
+              <text x="478" y="73" text-anchor="middle" fill="#a99c85">classifier</text>
+              <rect x="548" y="52" width="100" height="34" rx="6" fill="#100c07" stroke="#3a2d1c"/>
+              <text x="598" y="68" text-anchor="middle" fill="#a99c85">259 logits</text>
+              <text x="598" y="81" text-anchor="middle" fill="#8a7f6b">→ sample</text>
+              <line x1="78"  y1="69" x2="108" y2="69" stroke="#8a7f6b" marker-end="url(#arr)"/>
+              <line x1="176" y1="69" x2="206" y2="69" stroke="#8a7f6b" marker-end="url(#arr)"/>
+              <line x1="408" y1="69" x2="438" y2="69" stroke="#8a7f6b" marker-end="url(#arr)"/>
+              <line x1="516" y1="69" x2="546" y2="69" stroke="#8a7f6b" marker-end="url(#arr)"/>
+              <path d="M598 88 L598 132 L43 132 L43 90" fill="none" stroke="#bb6528" stroke-dasharray="4 3" marker-end="url(#arr)"/>
+              <text x="320" y="146" text-anchor="middle" fill="#8a7f6b">the sampled token becomes the next input — autoregression</text>
+            </g>
+          </svg>
+          <p class="cap">One token in, one probability distribution out — looped.</p>
+        </div>
+
+        <div class="step" id="s5" data-n="05" data-phase="fwd">
+          <header>
+            <span class="tag">05 · rmsnorm</span>
+            <h3>Keeping the numbers sane</h3>
+            <p>Before every sub-layer, the stream is rescaled to unit
+              <span class="term" data-tip="Root mean square: sqrt(mean(x²)). RMSNorm divides by it — no mean-subtraction, no bias. Llama's cheaper take on LayerNorm.">RMS</span>
+              and given a learned per-dimension gain. Five lines. Without it, activations drift in scale as
+              they pass through dozens of matmuls and training falls apart.</p>
+          </header>
+          <div class="code-wrap"><span class="file">src/run.c — rmsnorm()</span>
+          <pre><code data-lang="c">void rmsnorm(float* o, float* x, float* weight, int size) {
+    float ss = 0.0f;
+    for (int j = 0; j &lt; size; j++) ss += x[j] * x[j];
+    ss = 1.0f / sqrtf(ss / size + 1e-5f);        // 1 / rms(x)
+    for (int j = 0; j &lt; size; j++) o[j] = weight[j] * (ss * x[j]);
+}</code></pre></div>
+        </div>
+
+        <div class="step" id="s6" data-n="06" data-phase="fwd">
+          <header>
+            <span class="tag">06 · matmul</span>
+            <h3>Where all the time goes</h3>
+            <p>Every projection in the network — queries, keys, values, outputs, both feed-forward wings, the
+              classifier — is this one function. Each output element is a dot product of one weight row with the
+              input. This loop is ~95% of the runtime; every LLM speed trick you've heard of (quantization,
+              GPU kernels, batching) is fundamentally about making <em>this</em> faster.</p>
+          </header>
+          <div class="code-wrap"><span class="file">src/run.c — matmul()</span>
+          <pre><code data-lang="c">// out = W @ x   where W is (d, n) row-major, x is (n,)
+void matmul(float* out, float* x, float* w, int n, int d) {
+    for (int i = 0; i &lt; d; i++) {
+        float val = 0.0f;
+        float* wi = w + i * n;                 // row i of W
+        for (int j = 0; j &lt; n; j++) val += wi[j] * x[j];
+        out[i] = val;
+    }
+}</code></pre></div>
+        </div>
+
+        <div class="step" id="s7" data-n="07" data-phase="fwd">
+          <header>
+            <span class="tag">07 · rope</span>
+            <h3>Position as rotation</h3>
+            <p>The network has no idea <em>where</em> a token sits — attention is order-blind. RoPE fixes this by
+              <em>rotating</em> each adjacent pair of query/key dimensions by an angle proportional to the token's
+              position (faster for low dims, slower for high — a spectrum of frequencies). The magic: after
+              rotation, the dot product between a query and key depends only on their <em>relative</em> distance.</p>
+          </header>
+          <div class="code-wrap"><span class="file">src/run.c — forward(), RoPE</span>
+          <pre><code data-lang="c">for (int i = 0; i &lt; dim; i += 2) {
+    float freq = 1.0f / powf(10000.0f, (i % head_size) / (float)head_size);
+    float fcr = cosf(pos * freq), fci = sinf(pos * freq);
+    // rotate the pair (v0, v1) by angle pos*freq — complex multiplication
+    float v0 = vec[i], v1 = vec[i + 1];
+    vec[i]     = v0 * fcr - v1 * fci;
+    vec[i + 1] = v0 * fci + v1 * fcr;
+}</code></pre></div>
+        </div>
+
+        <div class="step" id="s8" data-n="08" data-phase="fwd">
+          <header>
+            <span class="tag">08 · attention</span>
+            <h3>The only place tokens meet</h3>
+            <p>Everything else operates on each position independently — attention is where context flows. Each
+              head scores the current token's <em>query</em> against every previous token's <em>key</em>,
+              softmaxes the scores into weights, and takes that weighted blend of their <em>values</em>. Past
+              keys/values sit in the <span class="term" data-tip="The KV cache: keys and values computed once per position and remembered, so step t costs O(t) instead of recomputing the whole prefix — this is why chatbots stream fast.">KV cache</span>.</p>
+            <p>And notice what's missing: there is no causal mask anywhere. A token <em>physically cannot</em> see
+              the future, because the future isn't in the cache yet. The loop bound <em>is</em> the mask.</p>
+          </header>
+          <div class="code-wrap"><span class="file">src/run.c — forward(), one head</span>
+          <pre><code data-lang="c">for (int t = 0; t &lt;= pos; t++) {              // every position so far
+    float* kt = key_cache + t*kv_dim + head_offset;
+    float score = 0.0f;
+    for (int i = 0; i &lt; head_size; i++) score += q[i] * kt[i];
+    att[t] = score / sqrtf(head_size);         // scaled dot product
+}
+softmax(att, pos + 1);                         // scores -&gt; weights
+
+for (int t = 0; t &lt;= pos; t++) {              // blend the values
+    float* vt = value_cache + t*kv_dim + head_offset;
+    for (int i = 0; i &lt; head_size; i++) xb[i] += att[t] * vt[i];
+}</code></pre></div>
+        </div>
+
+        <div class="step" id="s9" data-n="09" data-phase="fwd">
+          <header>
+            <span class="tag">09 · swiglu</span>
+            <h3>Where the knowledge lives</h3>
+            <p>After attention gathers context, the feed-forward block does the per-token "thinking": expand to a
+              wider hidden space through two parallel projections, gate one with the other using
+              <span class="term" data-tip="SiLU (swish): x·sigmoid(x). Smooth, non-monotonic, empirically better than ReLU in transformers.">SiLU</span>,
+              contract back down. Most of the model's parameters — and most of what it <em>knows</em> — are in
+              these three matrices per layer.</p>
+          </header>
+          <div class="code-wrap"><span class="file">src/run.c — forward(), SwiGLU</span>
+          <pre><code data-lang="c">matmul(s-&gt;hb,  s-&gt;xb, w-&gt;w1 + ..., dim, hidden_dim);   // gate path
+matmul(s-&gt;hb2, s-&gt;xb, w-&gt;w3 + ..., dim, hidden_dim);   // up path
+for (int i = 0; i &lt; hidden_dim; i++) {
+    float val = s-&gt;hb[i];
+    val *= 1.0f / (1.0f + expf(-val));   // SiLU: x * sigmoid(x)
+    s-&gt;hb[i] = val * s-&gt;hb2[i];          // gated by the up path
+}
+matmul(s-&gt;xb, s-&gt;hb, w-&gt;w2 + ..., hidden_dim, dim);    // back down</code></pre></div>
+        </div>
+
+        <div class="step" id="s10" data-n="10" data-phase="fwd">
+          <header>
+            <span class="tag">10 · logits</span>
+            <h3>259 opinions about what comes next</h3>
+            <p>After the last layer: one final norm, then the residual stream is scored against every row of the
+              (tied) embedding table. The result is a raw score — a <em>logit</em> — for each of the 259 tokens
+              in the vocabulary. That vector is the model's entire output; everything after this is just
+              deciding how to pick from it.</p>
+          </header>
+          <div class="code-wrap"><span class="file">src/run.c — forward(), the head</span>
+          <pre><code data-lang="c">rmsnorm(x, x, w-&gt;rms_final_weight, dim);
+matmul(s-&gt;logits, x, w-&gt;wcls, dim, p-&gt;vocab_size);  // one score per token
+return s-&gt;logits;</code></pre></div>
+        </div>
+
+        <div class="phase-row"><span class="label">Text ⇄ Tokens</span></div>
+
+        <div class="step" id="s11" data-n="11" data-phase="txt">
+          <header>
+            <span class="tag">11 · tokenizer</span>
+            <h3>One byte, one token</h3>
+            <p>Real Llama uses 32,000 learned <span class="term" data-tip="Byte-pair encoding: start from characters, repeatedly merge the most common adjacent pair into a new token. 'th'+'e' → 'the'.">BPE</span>
+              merges. This model goes simpler: the vocabulary is just <em>the 256 possible bytes</em> (plus 3
+              specials). Nothing to train, and the C encode/decode machinery — including the full BPE merge
+              loop — works unchanged; it simply finds nothing to merge. The price: one byte = one token, so 256
+              context tokens ≈ 256 characters.</p>
+          </header>
+          <div class="code-wrap"><span class="file">src/tokenizer_export.py</span>
+          <pre><code data-lang="py"># id 0..2: &lt;unk&gt; &lt;s&gt; &lt;/s&gt;, then one token per raw byte
+def token_string(b):
+    if 32 <= b <= 126 or b in (9, 10, 13):   # printable + whitespace
+        return bytes([b])                     # the byte IS the token string
+    return f"<0x{b:02X}>".encode()            # run.c already decodes these
+
+tokens = [b"&lt;unk&gt;", b"&lt;s&gt;", b"&lt;/s&gt;"] + [token_string(b) for b in range(256)]</code></pre></div>
+        </div>
+
+        <div class="step" id="s12" data-n="12" data-phase="txt">
+          <header>
+            <span class="tag">12 · sampling</span>
+            <h3>Rolling the dice, carefully</h3>
+            <p><span class="term" data-tip="Dividing logits by T before softmax. T→0 sharpens toward the argmax (deterministic); T>1 flattens toward uniform (chaotic).">Temperature</span>
+              reshapes the distribution, then <span class="term" data-tip="Nucleus sampling: keep only the smallest set of tokens whose probabilities sum to p (0.9 here), renormalize, sample from those.">top-p</span>
+              cuts off the long tail of unlikely tokens before drawing. That's the whole difference between the
+              temp-0 and temp-1.4 output in the demo above — same model, same logits, different dice.</p>
+          </header>
+          <div class="code-wrap"><span class="file">src/run.c — sample()</span>
+          <pre><code data-lang="c">if (temperature == 0.0f) return sample_argmax(logits, n);  // greedy
+
+for (int q = 0; q &lt; n; q++) logits[q] /= temperature;  // reshape...
+softmax(logits, n);                                    // ...normalize...
+float coin = random_f32(&amp;rng_state);                   // ...and roll
+return sample_topp(logits, n, topp, probindex, coin);  // within the nucleus</code></pre></div>
+        </div>
+
+        <div class="phase-row"><span class="label">Training — Where The Weights Came From</span></div>
+
+        <div class="step" id="s13" data-n="13" data-phase="train">
+          <header>
+            <span class="tag">13 · the twin</span>
+            <h3>The same model, written twice</h3>
+            <p>The weights were trained by a PyTorch model that mirrors run.c <em>exactly</em> — same RMSNorm
+              epsilon, same RoPE base and pairing convention, same tied classifier. Get any one of those wrong
+              and the exported model produces fluent garbage: the file loads fine, the math runs fine, and every
+              number is subtly wrong. The two implementations agreeing <em>is</em> the correctness proof.</p>
+          </header>
+          <div class="code-wrap"><span class="file">src/model.py — the contract knobs</span>
+          <pre><code data-lang="py">@dataclass
+class ModelArgs:
+    dim: int = 192          # residual stream width
+    n_layers: int = 5
+    n_heads: int = 6
+    vocab_size: int = 259   # byte-level
+    hidden_dim: int = 512
+    max_seq_len: int = 256
+    norm_eps: float = 1e-5  # MUST match run.c's rmsnorm
+    # RoPE: base 10000, ADJACENT-pair rotation (i, i+1) — run.c's
+    # convention, NOT HuggingFace's rotate-half. One wrong knob = garbage.</code></pre></div>
+        </div>
+
+        <div class="step" id="s14" data-n="14" data-phase="train">
+          <header>
+            <span class="tag">14 · training</span>
+            <h3>Watching it learn — then memorize</h3>
+            <p>2.26M parameters, ~1.1M tokens of Shakespeare, AdamW, six minutes on a laptop GPU. Loss starts at
+              5.56 — exactly ln(259), the loss of pure guessing — and the curves below are the real run. Around
+              iteration 750 the <em>validation</em> loss bottoms out and turns back up while training loss keeps
+              falling: the model has started memorizing its corpus instead of learning English. The shipped
+              checkpoint is the one from the bottom of the valley.</p>
+          </header>
+          <div class="diagram in" style="border:none; margin:0; border-radius:0; border-top:1px solid var(--border);">
+          <svg viewBox="0 0 640 240" role="img" aria-label="training and validation loss curves">
+            <g class="dgm-txt">
+              <line x1="50" y1="20" x2="50" y2="200" stroke="#3a2d1c"/>
+              <line x1="50" y1="200" x2="620" y2="200" stroke="#3a2d1c"/>
+              <text x="40" y="24"  text-anchor="end" fill="#8a7f6b">5.6</text>
+              <text x="40" y="93"  text-anchor="end" fill="#8a7f6b">3.0</text>
+              <text x="40" y="146" text-anchor="end" fill="#8a7f6b">1.5</text>
+              <text x="40" y="204" text-anchor="end" fill="#8a7f6b">0</text>
+              <text x="50"  y="216" text-anchor="middle" fill="#8a7f6b">0</text>
+              <text x="192" y="216" text-anchor="middle" fill="#8a7f6b">500</text>
+              <text x="335" y="216" text-anchor="middle" fill="#8a7f6b">1000</text>
+              <text x="478" y="216" text-anchor="middle" fill="#8a7f6b">1500</text>
+              <text x="620" y="216" text-anchor="middle" fill="#8a7f6b">2000 iters</text>
+              <!-- val loss: (iter/2000)*570+50, y = 200 - loss/5.6*180 -->
+              <polyline fill="none" stroke="#ffa657" stroke-width="2"
+                points="50,21 121,146.6 192,150.4 264,150.8 335,148.6 406,145.6 478,142.2 549,138.5 620,135.7"/>
+              <!-- train loss -->
+              <polyline fill="none" stroke="#79c0ff" stroke-width="1.5" stroke-dasharray="5 3"
+                points="50,20.6 121,152.7 192,159.5 264,163.0 335,166.1 406,169.8 478,173.1 549,175.9 620,177.7"/>
+              <circle cx="264" cy="150.8" r="5" fill="none" stroke="#7ee787" stroke-width="2"/>
+              <line x1="264" y1="150.8" x2="264" y2="60" stroke="#7ee787" stroke-dasharray="3 3" opacity=".6"/>
+              <text x="264" y="50" text-anchor="middle" fill="#7ee787">iter 750 — val bottoms at 1.53: ship this one</text>
+              <text x="560" y="128" fill="#ffa657">val ↗ memorizing</text>
+              <text x="560" y="190" fill="#79c0ff">train ↘</text>
+            </g>
+          </svg>
+          <p class="cap">The real loss curves from this model's training run. Divergence = overfitting, live.</p>
+          </div>
+        </div>
+
+        <div class="step" id="s15" data-n="15" data-phase="train">
+          <header>
+            <span class="tag">15 · export</span>
+            <h3>The handshake between two worlds</h3>
+            <p>Export is just serialization discipline: write the 7-int header, then dump every tensor in exactly
+              the order step 03's pointer walk reads them. PyTorch stores linear weights as (out, in) row-major —
+              the very layout run.c's matmul indexes — so there's not even a transpose. Train in Python,
+              run anywhere C runs. Which, via WebAssembly, includes the page you're reading.</p>
+          </header>
+          <div class="code-wrap"><span class="file">src/export.py — legacy_export()</span>
+          <pre><code data-lang="py">f.write(struct.pack("&lt;7i", dim, hidden_dim, n_layers,
+                    n_heads, n_kv_heads, vocab_size, seq_len))
+serialize_fp32(f, model.tok_embeddings.weight)
+for layer in model.layers: serialize_fp32(f, layer.attention_norm.weight)
+for layer in model.layers: serialize_fp32(f, layer.attention.wq.weight)
+# ...wk, wv, wo, ffn norms, w1, w2, w3, final norm —
+# the exact order memory_map_weights() walks. This order IS the format.</code></pre></div>
+        </div>
+
+      </div>
+
+      <footer>
+        A Llama-style transformer written from scratch in C — trained on Shakespeare with a from-scratch
+        PyTorch twin, exported to a flat binary, and running live in this page via WebAssembly.<br>
+        Inspired by Andrej Karpathy's <a href="https://github.com/karpathy/llama2.c">llama2.c</a>.
+        No frameworks, no inference libraries, no API — the fire is running on your CPU.
+      </footer>
+    </main>
+  </div>
+
+  <script src="prometheus.js?v=1"></script>
+  <script>
+    // ── UI plumbing ──────────────────────────────────────────────────────
+    const $ = id => document.getElementById(id);
+    const out = $("out"), statusEl = $("status"), goBtn = $("go"),
+          promptEl = $("prompt"), tempEl = $("temp"), tvalEl = $("tval"), tpsEl = $("tps");
+    tempEl.oninput = () => tvalEl.textContent = (+tempEl.value).toFixed(1);
+    document.querySelectorAll("#presets button").forEach(b =>
+      b.onclick = () => { promptEl.value = b.dataset.p; if (ready) generate(); });
+
+    // ── load the WASM engine + weights ───────────────────────────────────
+    let M = null, promStart, promNext, promDone, ready = false;
+
+    async function fetchWithProgress(url, label) {
+      const res = await fetch(url);
+      const total = +res.headers.get("Content-Length") || 0;
+      const reader = res.body.getReader(), chunks = [];
+      let got = 0;
+      for (;;) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        chunks.push(value); got += value.length;
+        if (total) statusEl.innerHTML =
+          '<span class="dot">●</span> ' + label + " " + Math.round(got / total * 100) + "%";
+      }
+      const buf = new Uint8Array(got);
+      let off = 0; for (const c of chunks) { buf.set(c, off); off += c.length; }
+      return buf;
+    }
+
+    (async () => {
+      try {
+        const [model, tok] = await Promise.all([
+          fetchWithProgress("models/shakespeare.bin?v=1", "fetching weights…"),
+          fetch("models/byte_tokenizer.bin?v=1").then(r => r.arrayBuffer())
+            .then(b => new Uint8Array(b)),
+        ]);
+        statusEl.innerHTML = '<span class="dot">●</span> compiling wasm…';
+        M = await Prometheus();
+        M.FS.writeFile("shakespeare.bin", model);
+        M.FS.writeFile("tokenizer.bin", tok);
+        const init = M.cwrap("prom_init", "number", ["string", "string"]);
+        promStart = M.cwrap("prom_start", "number",
+                            ["string", "number", "number", "number", "number"]);
+        promNext  = M.cwrap("prom_next", "string", []);
+        promDone  = M.cwrap("prom_is_done", "number", []);
+        init("shakespeare.bin", "tokenizer.bin");
+        // benchmark the raw engine: run one silent generation flat-out
+        promStart("ROMEO:", 1.0, 0.9, 12345, 96);
+        const b0 = performance.now(); let bn = 0;
+        while (!promDone()) { promNext(); bn++; }
+        engineTps = Math.round(bn / ((performance.now() - b0) / 1000));
+        statusEl.classList.add("live");
+        statusEl.innerHTML = '<span class="dot">●</span> live · weights resident';
+        out.textContent = "";
+        ready = true; goBtn.disabled = false;
+        tpsEl.textContent = "engine: " + engineTps + " tok/s";
+        generate();                       // fire a first sample automatically
+      } catch (e) {
+        statusEl.innerHTML = '<span class="dot" style="color:var(--red)">●</span> failed to load';
+        out.textContent = "could not initialize: " + e;
+      }
+    })();
+
+    // ── generation driver ─────────────────────────────────────────────────
+    // The engine is far faster than a readable typewriter, so we PACE the
+    // display at DISPLAY_RATE tok/s on the wall clock. Pacing by elapsed time
+    // (not per-frame counts) means a throttled rAF simply catches up in a
+    // burst instead of crawling — the pane stays honest even when hidden.
+    const DISPLAY_RATE = 100;
+    let engineTps = 0, running = false, raf = 0;
+    function generate() {
+      if (!ready) return;
+      cancelAnimationFrame(raf);
+      const prompt = promptEl.value;
+      const seed = (Math.random() * 0x7fffffff) >>> 0;
+      promStart(prompt, +tempEl.value, 0.9, seed, 256);
+      out.innerHTML = "";
+      const span = document.createElement("span");
+      out.appendChild(span);
+      const cur = document.createElement("span");
+      cur.id = "cursor"; out.appendChild(cur);
+      running = true; goBtn.textContent = "■ stop";
+      let text = "", n = 0; const t0 = performance.now();
+
+      function frame() {
+        if (!running) return;
+        const due = Math.floor((performance.now() - t0) / 1000 * DISPLAY_RATE) - n;
+        for (let i = 0; i < due; i++) {
+          const piece = promNext();
+          if (promDone()) { finish(); break; }
+          text += piece; n++;
+        }
+        span.textContent = text;
+        if (running) raf = requestAnimationFrame(frame);
+      }
+      function finish() {
+        running = false; goBtn.textContent = "▶ generate";
+        span.textContent = text; cur.remove();
+        tpsEl.textContent = "engine: " + engineTps + " tok/s";
+      }
+      raf = requestAnimationFrame(frame);
+    }
+    goBtn.onclick = () => {
+      if (running) { running = false; goBtn.textContent = "▶ generate"; $("cursor")?.remove(); }
+      else generate();
+    };
+    promptEl.addEventListener("keydown", e => { if (e.key === "Enter") generate(); });
+
+    // ── sidebar nav, scroll-spy, reveal, progress, copy, highlighter ─────
+    const PHASES = { loop:"The Loop", fwd:"Forward Pass", txt:"Text ⇄ Tokens", train:"Training" };
+    const nav = $("nav");
+    let curPhase = null;
+    document.querySelectorAll(".step").forEach(step => {
+      const ph = step.dataset.phase;
+      if (ph !== curPhase) {
+        const h = document.createElement("div"); h.className = "phase"; h.textContent = PHASES[ph];
+        nav.appendChild(h); curPhase = ph;
+      }
+      const a = document.createElement("a");
+      a.href = "#" + step.id;
+      a.innerHTML = '<span class="num">' + step.dataset.n + '</span>' + step.querySelector("h3").textContent;
+      nav.appendChild(a);
+    });
+    const navLinks = [...nav.querySelectorAll("a")];
+
+    const spy = new IntersectionObserver(entries => {
+      entries.forEach(e => {
+        if (e.isIntersecting)
+          navLinks.forEach(a => a.classList.toggle("active", a.getAttribute("href") === "#" + e.target.id));
+      });
+    }, { rootMargin: "-15% 0px -70% 0px", threshold: 0 });
+    document.querySelectorAll(".step").forEach(s => spy.observe(s));
+
+    const reveal = new IntersectionObserver(entries => {
+      entries.forEach(e => { if (e.isIntersecting) { e.target.classList.add("in"); reveal.unobserve(e.target); } });
+    }, { rootMargin: "0px 0px -8% 0px", threshold: 0.06 });
+    document.querySelectorAll(".step, .diagram").forEach(el => reveal.observe(el));
+
+    const prog = $("progress");
+    addEventListener("scroll", () => {
+      const h = document.documentElement;
+      prog.style.width = (h.scrollTop / (h.scrollHeight - h.clientHeight) * 100) + "%";
+    }, { passive: true });
+
+    document.querySelectorAll(".code-wrap").forEach(wrap => {
+      const btn = document.createElement("button");
+      btn.className = "copy"; btn.textContent = "copy";
+      btn.onclick = () => {
+        navigator.clipboard.writeText(wrap.querySelector("code").textContent.trim());
+        btn.textContent = "copied ✓"; btn.classList.add("done");
+        setTimeout(() => { btn.textContent = "copy"; btn.classList.remove("done"); }, 1400);
+      };
+      wrap.appendChild(btn);
+    });
+
+    // Lightweight syntax highlighting. One combined regex, one pass:
+    // sequential .replace() calls would re-scan the <span> tags inserted by
+    // earlier passes (the keyword "class" matches inside class="...").
+    const TOKEN_RX = new RegExp(
+      '("[^"]*")' +                                        // 1: string
+      '|\\b(0x[0-9A-Fa-f]+|\\d+\\.?\\d*(?:e-?\\d+)?f?)\\b' + // 2: number
+      '|\\b(void|int|char|float|unsigned|static|struct|typedef|return|for|if|else|while|break|sizeof|const|def|class|import|from|in|not|and|or|None|True|False|dataclass)\\b',
+      "g");                                                 // 3: keyword
+    function commentIndex(line, marker) {
+      let inStr = false;
+      for (let i = 0; i < line.length; i++) {
+        const ch = line[i];
+        if (ch === '"') inStr = !inStr;
+        else if (!inStr && line.startsWith(marker, i)) return i;
+      }
+      return -1;
+    }
+    function highlight(raw, lang) {
+      const marker = lang === "py" ? "#" : "//";
+      return raw.split("\n").map(line => {
+        const ci = commentIndex(line, marker);
+        const codePart = ci >= 0 ? line.slice(0, ci) : line;
+        const comPart  = ci >= 0 ? line.slice(ci) : "";
+        let out = codePart.replace(TOKEN_RX, (m, s, n, k) =>
+          s ? '<span class="s">' + s + "</span>" :
+          n ? '<span class="n">' + n + "</span>" :
+              '<span class="k">' + k + "</span>");
+        if (comPart) out += '<span class="c">' + comPart + "</span>";
+        return out;
+      }).join("\n");
+    }
+    document.querySelectorAll("code[data-lang]").forEach(el => {
+      el.innerHTML = highlight(el.innerHTML, el.dataset.lang);
+    });
+  </script>
+</body>
+</html>

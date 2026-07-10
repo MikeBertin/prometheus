@@ -1,0 +1,28 @@
+# Model checkpoints / training artifacts (root models/ is fetched or trained,
+# never committed — web/models/ IS tracked so the browser demo is self-contained)
+models/*.bin
+models/*.gguf
+*.pt
+
+# Training data
+data/
+
+# Build artifacts
+build/
+*.o
+run
+*.dSYM/
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# local-only working notes — kept on disk, not published to the repo
+HANDOVER.md
+STATUS.md
+log.md
+
+# editor / tooling config (preview-server launch config) — local only
+.claude/
+.DS_Store
