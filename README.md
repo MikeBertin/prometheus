@@ -27,6 +27,7 @@ At that he makes the excellent fair devotion,
 
 ```
 src/run.c                the entire inference engine (~600 lines, heavily commented)
+src/runq.c               the same engine with int8-quantized weights (Q8_0)
 src/model.py             the PyTorch training-time twin — mirrors run.c exactly
 src/train.py             trains on tiny-Shakespeare (AdamW, ~6 min on Apple MPS)
 src/export.py            serializes weights in the exact order run.c mmaps them
@@ -76,6 +77,32 @@ Training deliberately shows its work: loss starts at ln(259) — pure guessing �
 the demo page charts the real run, including the moment validation loss turns up
 while training loss keeps falling (overfitting, live). The shipped checkpoint is the
 early-stopped one from the bottom of the valley.
+
+## int8 quantization (`runq.c`)
+
+The sibling engine stores every matmul weight as **Q8_0**: int8 values plus one
+fp32 scale per group of consecutive values (`scale = max|w|/127`). Activations
+quantize on the fly; the hot inner loop runs integer multiplies with an int32
+accumulator. Norms, the KV cache and everything between ops stay fp32.
+
+matmul is memory-bandwidth-bound, so 1-byte weights ≈ 4× less traffic:
+the Shakespeare model drops 9.1→2.4 MB and roughly doubles in speed;
+stories15M drops 60.8→17.1 MB.
+
+```sh
+.venv/bin/python src/export.py models/ckpt.pt models/shakespeare_q80.bin --q80
+make bardq
+
+# export.py also quantizes legacy fp32 .bin files directly — no .pt needed:
+.venv/bin/python src/export.py models/stories15M.bin models/stories15M_q80.bin --q80
+./runq models/stories15M_q80.bin -z models/tokenizer.bin -i "Once upon a time"
+```
+
+One hard-won detail: quantization groups must align with matrix rows, so the
+exporter shrinks the group size until it divides `dim` and `hidden_dim` —
+at GS=64 a dim-288 model reads its neighbours' scales on every odd row and
+emits intermittent junk while staying eerily fluent. `runq.c` refuses such
+checkpoints loudly rather than generating beautifully wrong Shakespeare.
 
 ## The interesting constraint
 

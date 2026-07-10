@@ -4,6 +4,7 @@
 #   make debug      -> -O0 -g with sanitizers, for debugging the math
 #   make demo       -> build + run the stories15M model with a prompt
 #   make bard       -> build + run OUR OWN trained model (Phase 2)
+#   make bardq      -> the same model, int8-quantized via runq.c (Phase 4)
 #   make train      -> train + export the Shakespeare model (needs .venv)
 #   make clean
 
@@ -12,16 +13,22 @@ CFLAGS  = -O3 -ffast-math -march=native -funroll-loops -Wall -Wextra
 LDFLAGS = -lm
 SRC     = src/run.c
 BIN     = run
+QSRC    = src/runq.c
+QBIN    = runq
 
 MODEL   = models/stories15M.bin
 TOKEN   = models/tokenizer.bin
 
-.PHONY: all debug demo bard train web clean
+.PHONY: all debug demo bard bardq train web clean
 
-all: $(BIN)
+all: $(BIN) $(QBIN)
 
 $(BIN): $(SRC)
 	$(CC) $(CFLAGS) $(SRC) -o $(BIN) $(LDFLAGS)
+
+# int8-quantized engine (Q8_0 checkpoints from export.py --q80)
+$(QBIN): $(QSRC)
+	$(CC) $(CFLAGS) $(QSRC) -o $(QBIN) $(LDFLAGS)
 
 # Debug build: no fast-math, full warnings, address+UB sanitizers.
 debug: $(SRC)
@@ -33,6 +40,10 @@ demo: $(BIN)
 # Phase 2: our own weights, trained by src/train.py, byte-level tokenizer.
 bard: $(BIN)
 	./$(BIN) models/shakespeare.bin -z models/byte_tokenizer.bin -t 0.8 -i "ROMEO:"
+
+# Phase 4: the same bard, int8-quantized (4x smaller checkpoint).
+bardq: $(QBIN)
+	./$(QBIN) models/shakespeare_q80.bin -z models/byte_tokenizer.bin -t 0.8 -i "ROMEO:"
 
 train:
 	.venv/bin/python src/tokenizer_export.py models/byte_tokenizer.bin
@@ -49,5 +60,5 @@ web: src/web_api.c src/run.c
 	cp models/shakespeare.bin models/byte_tokenizer.bin web/models/
 
 clean:
-	rm -f $(BIN)
+	rm -f $(BIN) $(QBIN)
 	rm -rf *.dSYM

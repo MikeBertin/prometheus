@@ -129,3 +129,32 @@ the hero + 15-step annotated walkthrough (including the real loss curves).
   elapsed time means throttled rAF frames burst-catch-up instead of crawling.
 - Serve locally: `python3 -m http.server --directory web` (or the
   `prometheus-web` entry in `.claude/launch.json`).
+
+## Phase 4 — int8 quantization (`runq.c`)
+
+[`src/runq.c`](../src/runq.c) is run.c's quantized sibling: same transformer,
+but every matmul weight stored as **Q8_0** — int8 values + one fp32 scale per
+group of GS consecutive values (`scale = max|w|/127`, symmetric). Activations
+are quantized on the fly before each matmul; the inner dot product accumulates
+in int32 and applies the two scales once per group. Norms, activations
+between ops, the KV cache and logits stay fp32.
+
+Why it wins: matmul is memory-bandwidth-bound, and int8 moves 4× fewer bytes.
+Measured (M-series, `-n 256`): Shakespeare 9.1→2.4 MB and ~6.7k→~15.8k tok/s
+(2.3×); stories15M 60.8→17.1 MB and 944→1,572 tok/s (1.7×).
+
+Export: `export.py --q80` writes the v2 "ak42" format (256-byte header with
+`shared_classifier` + `group_size`, fp32 norms first, then each tensor as
+`[int8 q][fp32 scales]`). It accepts either `ckpt.pt` **or a legacy fp32
+.bin** — so stories15M can be quantized without its original checkpoint.
+
+**The gotcha that cost an hour**: groups must align with matrix *rows*.
+runq.c's matmul indexes a weight's scales as `(row*n + j)/GS`, valid only if
+GS divides every row length (dim *and* hidden_dim). stories15M has dim=288 —
+not divisible by 64 — so at GS=64 every odd row read its neighbour's scales
+and the model emitted intermittent junk tokens ("named**opts**a") while
+mostly-fluent text survived. Shakespeare (dim=192) masked the bug entirely.
+The exporter now auto-shrinks GS (64→32 for stories15M) and runq.c refuses
+misaligned checkpoints loudly. Diagnosis path worth remembering: fp32
+roundtrip through run.c proved the parser, then greedy (temp 0) comparison
+isolated corruption to specific vocab rows → scale misalignment.
