@@ -3,10 +3,14 @@
 > *"Yes, and besides, I gave them fire."* — Prometheus, in Aeschylus, *Prometheus Bound* (5th c. BC)
 
 A Llama-2-style transformer written from scratch in ~600 lines of pure C — RMSNorm,
-rotary position embeddings, multi-head attention with a KV cache, SwiGLU, a byte-level
-tokenizer and a top-p sampler. Trained from random weights on the complete works of
-Shakespeare by its own from-scratch PyTorch twin, exported to a flat binary of floats,
-and running **live in your browser** via WebAssembly.
+rotary position embeddings, multi-head attention with a KV cache, SwiGLU, a BPE
+tokenizer and a top-p sampler. Trained from random weights by its own from-scratch
+PyTorch twin, exported to a flat binary of floats, int8-quantized, and running
+**live in your browser** via WebAssembly.
+
+Two self-trained models ship in the demo, switchable live in the same C engine: a
+**7M-parameter model** trained on ~300 MB of TinyStories with a from-scratch
+4096-vocab BPE tokenizer, and the original **2.3M byte-level Shakespeare** model.
 
 **▶ Live demo + annotated walkthrough: [mikebertin.github.io/prometheus](https://mikebertin.github.io/prometheus/)**
 
@@ -16,12 +20,12 @@ No inference libraries, no frameworks, no API calls. Every token is a full forwa
 pass through the transformer, hand-written in one C file you can read in an evening.
 
 ```
-ROMEO:
-No fear me for my soul, I cannot for my face;
-But I have seen to see how some secure
-At that he makes the excellent fair devotion,
+Once upon a time, there was a little dog named Spot. He was going to the park
+with his family. When they got there, Spot saw a big slide. He wanted to go on
+it, but he was scared. His mom said, "Don't be scared, Spot." So he climbed the
+ladder, slid down, and laughed.
 ```
-*— 2.26M parameters' honest attempt at iambic pentameter*
+*— 7M parameters, trained on TinyStories, running int8 in the browser*
 
 ## What's here
 
@@ -29,30 +33,35 @@ At that he makes the excellent fair devotion,
 src/run.c                the entire inference engine (~600 lines, heavily commented)
 src/runq.c               the same engine with int8-quantized weights (Q8_0)
 src/model.py             the PyTorch training-time twin — mirrors run.c exactly
-src/train.py             trains on tiny-Shakespeare (AdamW, ~6 min on Apple MPS)
+src/train.py             trains Shakespeare (bytes) or TinyStories (BPE, memmap)
 src/export.py            serializes weights in the exact order run.c mmaps them
 src/tokenizer_export.py  byte-level tokenizer (vocab 259) in run.c's format
+src/bpe.py               from-scratch byte-level BPE — trains merges, run.c's format
+src/prepare_data.py      tokenizes a corpus once into a uint16 memmap for training
 src/web_api.c            thin emscripten wrapper — the same run.c, compiled to WASM
 web/                     the live demo page + walkthrough (tracked in full,
-                         including the trained weights, so it deploys as-is)
+                         including both trained models, so it deploys as-is)
 ```
 
 The architecture, in the order `forward()` runs it:
 
 ```
-token id ─► embedding ─► ┌─ per layer ×5 ──────────────────┐ ─► RMSNorm
+token id ─► embedding ─► ┌─ per layer ×6 ──────────────────┐ ─► RMSNorm
                          │  RMSNorm → attention (+KV) → add │    ─► classifier
-                         │  RMSNorm → SwiGLU          → add │    ─► 259 logits
+                         │  RMSNorm → SwiGLU          → add │    ─► logits
                          └─────────────────────────────────┘    ─► sample → loop
 ```
 
 ## Run it
 
 ```sh
-make                       # optimized native build (clang, -O3)
+make                       # optimized native build (clang, -O3): run + runq
 
-# instant gratification: the trained Shakespeare weights ship in web/models/
-./run web/models/shakespeare.bin -z web/models/byte_tokenizer.bin -t 0.8 -i "ROMEO:"
+# instant gratification: both trained models ship int8-quantized in web/models/
+./runq web/models/tinystories_q80.bin -z web/models/tinystories_tokenizer.bin \
+  -t 0.85 -i "Once upon a time"
+./runq web/models/shakespeare_q80.bin -z web/models/byte_tokenizer.bin \
+  -t 0.8 -i "ROMEO:"
 
 # or the classic llama2.c validation target — Karpathy's TinyStories model:
 curl -L -o models/stories15M.bin \
@@ -73,10 +82,35 @@ make bard                  # hear your own bard speak
 make web                   # rebuild the WASM demo with your weights (needs emscripten)
 ```
 
-Training deliberately shows its work: loss starts at ln(259) — pure guessing — and
-the demo page charts the real run, including the moment validation loss turns up
-while training loss keeps falling (overfitting, live). The shipped checkpoint is the
-early-stopped one from the bottom of the valley.
+Training deliberately shows its work: loss starts at ln(vocab) — pure guessing — and
+the demo page charts the real run. On the tiny Shakespeare corpus you can watch
+validation loss turn up while training loss keeps falling (overfitting, live); the
+shipped checkpoint is the early-stopped one from the bottom of the valley.
+
+### Scale up: TinyStories + a real BPE tokenizer
+
+```sh
+# 1. a from-scratch byte-level BPE tokenizer (256 bytes → 4096-vocab merges)
+curl -L -o data/tinystories_valid.txt --create-dirs \
+  https://huggingface.co/datasets/roneneldan/TinyStories/resolve/main/TinyStories-valid.txt
+.venv/bin/python src/bpe.py --data data/tinystories_valid.txt --vocab 4096
+
+# 2. tokenize the corpus once into a uint16 memmap, then train a ~7M model
+.venv/bin/python src/prepare_data.py                # -> data/tinystories_{train,val}.bin
+.venv/bin/python src/train.py \
+  --train-bin data/tinystories_train.bin --val-bin data/tinystories_val.bin \
+  --merges models/tinystories.merges \
+  --dim 288 --layers 6 --heads 6 --hidden 768 --vocab 4096 --iters 6000 \
+  --out models/tinystories.bin --ckpt models/tinystories.pt
+make stories                                        # real words, whole stories
+```
+
+Because run.c's `encode()` is already a greedy "merge the highest-scored adjacent
+pair" loop — which *is* BPE — teaching it a real tokenizer needed **zero C changes**:
+`bpe.py` just writes the learned merges into the same `tokenizer.bin` format with
+`score = -rank`, and the engine reproduces our tokenization exactly. "Once upon a
+time" goes from 16 byte-tokens to ~4, so the model's 256-token context reaches four
+times deeper into a story.
 
 ## int8 quantization (`runq.c`)
 

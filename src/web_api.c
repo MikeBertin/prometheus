@@ -50,6 +50,21 @@ int prom_init(const char *model_path, const char *tokenizer_path) {
     return T.config.seq_len;  // so the UI can show/cap the step count
 }
 
+/* Swap to a different checkpoint + tokenizer at runtime (the model switcher).
+ * Frees whatever is currently resident, then loads the new pair. Lets one WASM
+ * build serve both the byte-level Shakespeare model and the BPE TinyStories
+ * one — the config (vocab_size, seq_len, dims) is read fresh from each file. */
+EMSCRIPTEN_KEEPALIVE
+int prom_reload(const char *model_path, const char *tokenizer_path) {
+    if (loaded) { free_transformer(&T); free_tokenizer(&TOK); }
+    if (sampler_built) { free_sampler(&S); sampler_built = 0; }
+    done = 1;
+    build_transformer(&T, (char *)model_path);
+    build_tokenizer(&TOK, (char *)tokenizer_path, T.config.vocab_size);
+    loaded = 1;
+    return T.config.seq_len;
+}
+
 EMSCRIPTEN_KEEPALIVE
 int prom_start(const char *prompt, float temperature, float topp,
                unsigned int seed, int n_steps) {

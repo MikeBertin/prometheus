@@ -100,6 +100,13 @@
   .presets button { font-size:11px; padding:3px 9px; color:var(--muted); }
   .presets button:hover { color:var(--accent); border-color:var(--accent-dim); }
 
+  .modelsel { display:flex; gap:6px; padding:12px 14px 0; flex-wrap:wrap; }
+  .modelsel button { font-size:12px; padding:5px 11px; color:var(--muted);
+    border:1px solid var(--line); border-radius:7px; background:transparent; }
+  .modelsel button:hover { color:var(--fg); border-color:var(--accent-dim); }
+  .modelsel button.on { color:var(--accent); border-color:var(--accent);
+    background:var(--accent-bg, rgba(230,150,60,.08)); }
+
   .crt-screen { padding:16px 18px 20px; min-height:230px; position:relative; }
   .crt-screen::after { content:""; position:absolute; inset:0; pointer-events:none;
     background:repeating-linear-gradient(#0000 0 2px, #ffffff07 2px 3px); mix-blend-mode:overlay; opacity:.5; }
@@ -210,21 +217,19 @@
       <section class="hero">
         <h1>A transformer language model, written from scratch in C —<br><span class="g">generating in your browser.</span></h1>
         <p class="sub">~600 lines of hand-written C: RMSNorm, rotary embeddings, multi-head attention with a KV
-          cache, SwiGLU, a byte-level tokenizer and a top-p sampler. The model below was <em>trained from
-          random weights</em> on the complete works of Shakespeare, <em>int8-quantized</em> down to 2.4 MB,
-          and the same C engine — compiled to WebAssembly — is running it live. No libraries, no
+          cache, a BPE tokenizer and a top-p sampler. Both models below were <em>trained from random
+          weights</em> — one on Shakespeare, one on ~300 MB of TinyStories — then <em>int8-quantized</em>,
+          and the same C engine, compiled to WebAssembly, runs whichever you pick. No libraries, no
           frameworks, no API calls.</p>
 
         <div class="crt">
           <div class="crt-bar"><i class="r"></i><i class="y"></i><i class="g"></i>
-            <span>runq.c · 2.26M params · int8</span><span class="tps" id="tps"></span></div>
-          <div class="presets" id="presets">
-            <button data-p="ROMEO:">ROMEO:</button>
-            <button data-p="JULIET:">JULIET:</button>
-            <button data-p="KING RICHARD II:">KING RICHARD II:</button>
-            <button data-p="First Citizen:">First Citizen:</button>
-            <button data-p="">(no prompt — let it invent)</button>
+            <span id="engineline">runq.c · int8</span><span class="tps" id="tps"></span></div>
+          <div class="modelsel" id="modelsel">
+            <button data-m="stories" class="on">📖 TinyStories · 7M · BPE-4096</button>
+            <button data-m="bard">🎭 Shakespeare · 2.3M · byte-level</button>
           </div>
+          <div class="presets" id="presets"></div>
           <div class="controls">
             <input type="text" id="prompt" value="ROMEO:" spellcheck="false"
               placeholder="type a prompt — speaker names work best">
@@ -234,10 +239,11 @@
           </div>
           <div class="crt-screen"><pre id="out"><span class="loading">loading 2.4 MB of int8 weights…</span></pre></div>
         </div>
-        <p class="hint">Each speech <em>ends itself</em>: the model emits its beginning-of-sequence token when
-          it thinks the speaker block is done — it learned that from where BOS sat in the training data.
+        <p class="hint">Each passage <em>ends itself</em>: the model emits its beginning-of-sequence token when it
+          thinks the story (or speech) is done — it learned that from where BOS sat in the training data.
           Temperature 0 is greedy and deterministic; crank it past 1.0 for chaos. Every token you see is a
-          <em>full forward pass</em> through all 5 transformer layers, in C, on your CPU.</p>
+          <em>full forward pass</em> through all six transformer layers, in C, on your CPU — and the two
+          models even use different tokenizers (byte-level vs 4096-vocab BPE), swapped live in the engine.</p>
       </section>
 
       <div class="wt-head">
@@ -504,7 +510,8 @@ return s-&gt;logits;</code></pre></div>
               merges. This model goes simpler: the vocabulary is just <em>the 256 possible bytes</em> (plus 3
               specials). Nothing to train, and the C encode/decode machinery — including the full BPE merge
               loop — works unchanged; it simply finds nothing to merge. The price: one byte = one token, so 256
-              context tokens ≈ 256 characters.</p>
+              context tokens ≈ 256 characters. The TinyStories model (step 18) swaps in a <em>real</em> 4096-vocab
+              BPE tokenizer — same C code, learned merges instead of none.</p>
           </header>
           <div class="code-wrap"><span class="file">src/tokenizer_export.py</span>
           <pre><code data-lang="py"># id 0..2: &lt;unk&gt; &lt;s&gt; &lt;/s&gt;, then one token per raw byte
@@ -669,11 +676,61 @@ while cfg["dim"] % gs != 0 or cfg["hidden_dim"] % gs != 0:
 # if (config-&gt;dim % GS != 0 || config-&gt;hidden_dim % GS != 0) exit(1);</code></pre></div>
         </div>
 
+        <div class="phase-row"><span class="label">Scale-up</span></div>
+
+        <div class="step" id="s18" data-n="18" data-phase="scale">
+          <header>
+            <span class="tag">18 · real BPE</span>
+            <h3>From letters to words</h3>
+            <p>Try the <b>📖 TinyStories</b> model at the top — it reads far better than Shakespeare, for two
+              reasons. First, a <em>real</em> byte-pair-encoding tokenizer, trained from scratch: start from the
+              256 bytes and repeatedly fuse the most common adjacent pair into a new token, to a vocab of 4096.
+              The first merges it learns on children's stories are <code>he</code>, <code>&nbsp;t</code>,
+              <code>&nbsp;a</code>, <code>the</code> — the statistical skeleton of English. Now "Once upon a
+              time" is ~4 tokens, not 16, so the same 256-token window reaches four times deeper into a story.</p>
+            <p>And — the recurring theme of this whole project — <em>run.c needed zero changes</em>. Its encode()
+              was already a greedy "merge the highest-scored pair" loop, which is exactly BPE. We just write the
+              learned merges into the same tokenizer file with <code>score = -rank</code>, and the C engine
+              reproduces our tokenization for free.</p>
+          </header>
+          <div class="code-wrap"><span class="file">src/bpe.py — the entire training algorithm</span>
+          <pre><code data-lang="py">for i in range(n_merges):
+    pairs = Counter()                        # count every adjacent pair
+    for word, freq in corpus.items():
+        for a, b in zip(word, word[1:]):
+            pairs[(a, b)] += freq
+    (a, b), _ = pairs.most_common(1)[0]      # the most frequent pair...
+    merges.append((a, b))                    # ...becomes one new token
+    corpus = {merge(w, a, b, BASE + i): f for w, f in corpus.items()}</code></pre></div>
+        </div>
+
+        <div class="step" id="s19" data-n="19" data-phase="scale">
+          <header>
+            <span class="tag">19 · more data</span>
+            <h3>Seven million parameters, a real corpus</h3>
+            <p>Second reason: scale. The Shakespeare model saw ~1 MB of text; this one trained on
+              <em>~300 MB of TinyStories</em> — 79 million tokens, tokenized once into a memory-mapped
+              <code>uint16</code> array so the GPU never waits on Python. The model itself grew to
+              <em>7.2M parameters</em> (dim 288, 6 layers), the shape of Karpathy's stories15M but with our
+              leaner 4096 vocab. One epoch is ~4,800 steps, so a few thousand steps of training never even
+              finishes a full pass — the opposite of the Shakespeare model, which memorized its tiny corpus.
+              The result is what you're reading: real words, whole sentences, little arcs with a beginning and
+              a "happily ever after".</p>
+          </header>
+          <div class="code-wrap"><span class="file">src/train.py — same loop, bigger everything</span>
+          <pre><code data-lang="py"># pre-tokenized corpus, memory-mapped; sample random 256-token windows
+data = np.memmap("tinystories_train.bin", dtype=np.uint16, mode="r")
+ix = np.random.randint(0, len(data) - seq_len - 1, size=batch)
+x = np.stack([data[i     : i+seq_len    ] for i in ix])
+y = np.stack([data[i + 1 : i+seq_len + 1] for i in ix])   # targets = inputs shifted by one</code></pre></div>
+        </div>
+
       </div>
 
       <footer>
-        A Llama-style transformer written from scratch in C — trained on Shakespeare with a from-scratch
-        PyTorch twin, exported to a flat binary, and running live in this page via WebAssembly.<br>
+        A Llama-style transformer written from scratch in C — trained with a from-scratch PyTorch twin
+        (Shakespeare, and TinyStories with a from-scratch BPE tokenizer), exported to a flat binary,
+        int8-quantized, and running live in this page via WebAssembly.<br>
         Inspired by Andrej Karpathy's <a href="https://github.com/karpathy/llama2.c">llama2.c</a>.
         No frameworks, no inference libraries, no API — the fire is running on your CPU.
       </footer>
@@ -687,11 +744,39 @@ while cfg["dim"] % gs != 0 or cfg["hidden_dim"] % gs != 0:
     const out = $("out"), statusEl = $("status"), goBtn = $("go"),
           promptEl = $("prompt"), tempEl = $("temp"), tvalEl = $("tval"), tpsEl = $("tps");
     tempEl.oninput = () => tvalEl.textContent = (+tempEl.value).toFixed(1);
-    document.querySelectorAll("#presets button").forEach(b =>
-      b.onclick = () => { promptEl.value = b.dataset.p; if (ready) generate(); });
+
+    // ── the two models this one WASM engine can serve ────────────────────
+    const MODELS = {
+      stories: {
+        engine: "runq.c · 7.2M params · int8 · BPE-4096",
+        model: "models/tinystories_q80.bin", tok: "models/tinystories_tokenizer.bin",
+        size: "8 MB", temp: 0.85, prompt: "Once upon a time",
+        presets: ["Once upon a time", "One day, a little girl", "Tom and Lily went to the",
+                  "The dragon was very", ""],
+      },
+      bard: {
+        engine: "runq.c · 2.26M params · int8 · byte-level",
+        model: "models/shakespeare_q80.bin", tok: "models/byte_tokenizer.bin",
+        size: "2.4 MB", temp: 0.8, prompt: "ROMEO:",
+        presets: ["ROMEO:", "JULIET:", "KING RICHARD II:", "First Citizen:", ""],
+      },
+    };
+    let curModel = "stories";
+
+    function buildPresets(key) {
+      const box = $("presets");
+      box.innerHTML = "";
+      for (const p of MODELS[key].presets) {
+        const b = document.createElement("button");
+        b.textContent = p === "" ? "(no prompt — let it invent)" : p;
+        b.onclick = () => { promptEl.value = p; if (ready) generate(); };
+        box.appendChild(b);
+      }
+    }
 
     // ── load the WASM engine + weights ───────────────────────────────────
-    let M = null, promStart, promNext, promDone, ready = false;
+    let M = null, promStart, promNext, promDone, promReload, ready = false;
+    const fileCache = {};   // url -> Uint8Array, so switching back is instant
 
     async function fetchWithProgress(url, label) {
       const res = await fetch(url);
@@ -710,34 +795,66 @@ while cfg["dim"] % gs != 0 or cfg["hidden_dim"] % gs != 0:
       return buf;
     }
 
+    async function fetchCached(url, label) {
+      if (fileCache[url]) return fileCache[url];
+      const buf = await fetchWithProgress(url + "?v=2", label);
+      fileCache[url] = buf;
+      return buf;
+    }
+
+    // Fetch a model's checkpoint + tokenizer, hand them to the engine, and
+    // benchmark it. First call uses prom_init (via prom_reload, which handles
+    // the not-yet-loaded case); switching models calls it again to hot-swap.
+    async function loadModel(key) {
+      const m = MODELS[key];
+      curModel = key;
+      running = false; ready = false; goBtn.disabled = true;
+      $("engineline").textContent = m.engine;
+      buildPresets(key);
+      promptEl.value = m.prompt; tempEl.value = m.temp; tempEl.oninput();
+      document.querySelectorAll("#modelsel button")
+        .forEach(b => b.classList.toggle("on", b.dataset.m === key));
+
+      const [model, tok] = await Promise.all([
+        fetchCached(m.model, "fetching " + m.size + " of int8 weights…"),
+        fetchCached(m.tok, "fetching tokenizer…"),
+      ]);
+      M.FS.writeFile(key + ".bin", model);
+      M.FS.writeFile(key + ".tok", tok);
+      promReload(key + ".bin", key + ".tok");
+
+      // benchmark the raw engine flat-out (silent)
+      promStart(m.prompt || "The", 1.0, 0.9, 12345, 96);
+      const b0 = performance.now(); let bn = 0;
+      while (!promDone()) { promNext(); bn++; }
+      engineTps = Math.round(bn / ((performance.now() - b0) / 1000));
+
+      statusEl.classList.add("live");
+      statusEl.innerHTML = '<span class="dot">●</span> live · weights resident';
+      out.textContent = "";
+      ready = true; goBtn.disabled = false;
+      tpsEl.textContent = "engine: " + engineTps + " tok/s";
+    }
+
     (async () => {
       try {
-        const [model, tok] = await Promise.all([
-          fetchWithProgress("models/shakespeare_q80.bin?v=1", "fetching weights…"),
-          fetch("models/byte_tokenizer.bin?v=1").then(r => r.arrayBuffer())
-            .then(b => new Uint8Array(b)),
-        ]);
+        buildPresets(curModel);
         statusEl.innerHTML = '<span class="dot">●</span> compiling wasm…';
         M = await Prometheus();
-        M.FS.writeFile("shakespeare.bin", model);
-        M.FS.writeFile("tokenizer.bin", tok);
-        const init = M.cwrap("prom_init", "number", ["string", "string"]);
-        promStart = M.cwrap("prom_start", "number",
-                            ["string", "number", "number", "number", "number"]);
-        promNext  = M.cwrap("prom_next", "string", []);
-        promDone  = M.cwrap("prom_is_done", "number", []);
-        init("shakespeare.bin", "tokenizer.bin");
-        // benchmark the raw engine: run one silent generation flat-out
-        promStart("ROMEO:", 1.0, 0.9, 12345, 96);
-        const b0 = performance.now(); let bn = 0;
-        while (!promDone()) { promNext(); bn++; }
-        engineTps = Math.round(bn / ((performance.now() - b0) / 1000));
-        statusEl.classList.add("live");
-        statusEl.innerHTML = '<span class="dot">●</span> live · weights resident';
-        out.textContent = "";
-        ready = true; goBtn.disabled = false;
-        tpsEl.textContent = "engine: " + engineTps + " tok/s";
+        promStart   = M.cwrap("prom_start", "number",
+                              ["string", "number", "number", "number", "number"]);
+        promNext    = M.cwrap("prom_next", "string", []);
+        promDone    = M.cwrap("prom_is_done", "number", []);
+        promReload  = M.cwrap("prom_reload", "number", ["string", "string"]);
+        await loadModel(curModel);
         generate();                       // fire a first sample automatically
+        document.querySelectorAll("#modelsel button").forEach(b =>
+          b.onclick = async () => {
+            if (b.dataset.m === curModel || !M) return;
+            running = false;
+            await loadModel(b.dataset.m);
+            generate();
+          });
       } catch (e) {
         statusEl.innerHTML = '<span class="dot" style="color:var(--red)">●</span> failed to load';
         out.textContent = "could not initialize: " + e;
@@ -790,7 +907,7 @@ while cfg["dim"] % gs != 0 or cfg["hidden_dim"] % gs != 0:
     promptEl.addEventListener("keydown", e => { if (e.key === "Enter") generate(); });
 
     // ── sidebar nav, scroll-spy, reveal, progress, copy, highlighter ─────
-    const PHASES = { loop:"The Loop", fwd:"Forward Pass", txt:"Text ⇄ Tokens", train:"Training", quant:"Quantization" };
+    const PHASES = { loop:"The Loop", fwd:"Forward Pass", txt:"Text ⇄ Tokens", train:"Training", quant:"Quantization", scale:"Scale-up" };
     const nav = $("nav");
     let curPhase = null;
     document.querySelectorAll(".step").forEach(step => {

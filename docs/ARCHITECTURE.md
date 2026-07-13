@@ -163,3 +163,68 @@ The exporter now auto-shrinks GS (64→32 for stories15M) and runq.c refuses
 misaligned checkpoints loudly. Diagnosis path worth remembering: fp32
 roundtrip through run.c proved the parser, then greedy (temp 0) comparison
 isolated corruption to specific vocab rows → scale misalignment.
+
+---
+
+## Phase 5 — scaling up: real BPE + TinyStories
+
+Phases 2–4 used a **byte-level** tokenizer (vocab 259): every character is its
+own token, so "Once upon a time" is 16 tokens and the model spends most of its
+capacity relearning English spelling. Phase 5 replaces that with a **byte-level
+BPE** tokenizer trained from scratch, and trains a bigger model on a real
+corpus.
+
+### The tokenizer ([`src/bpe.py`](../src/bpe.py))
+
+Byte-Pair Encoding starts from the 256 raw bytes and repeatedly fuses the most
+frequent adjacent pair into a new token, until the vocabulary reaches a target
+size (4096). The first merges it learns on TinyStories are exactly what you'd
+guess: `he`, ` t`, ` a`, `in`, `the` — the statistical bones of English.
+
+**The key insight: run.c needed zero changes.** Its `encode()` was already a
+greedy "merge the highest-scored adjacent pair" loop — which *is* BPE decoding.
+So we only had to (a) train the merges and (b) write them into the same
+`tokenizer.bin` format with `score = -rank`, so the earliest-learned (highest
+priority) merge wins each step. run.c then reproduces our exact tokenization.
+
+Two conventions keep the Python trainer and the C encoder bit-identical:
+- **Byte ids = `byte + 3`** — the same offset run.c's byte-fallback path uses,
+  so unknown bytes map the same on both sides.
+- **Leading-space pre-tokenization** (" the" is one unit) means no learned
+  token ever spans a word boundary. So run.c's *global* greedy merge and our
+  *per-word* greedy merge partition text identically — which also lets the
+  Python encoder cache per unique word and stay fast.
+
+Result: "Once upon a time, there was a little robot" → ~11 tokens instead of
+~43. Each token now carries ~4 characters, so the model's fixed 256-token
+context reaches ~1000 characters into a story.
+
+### The data pipeline ([`src/prepare_data.py`](../src/prepare_data.py))
+
+TinyStories (~300 MB of the train split used here) is tokenized **once**,
+offline, into a flat `uint16` array on disk (vocab 4096 < 65536, so 2 bytes per
+token). Training memory-maps that array and samples random 256-token windows —
+the GPU never waits on Python. Each story is prefixed with BOS (id 1), so the
+model learns BOS = "a new story starts", and generation from run.c (which
+begins at BOS) opens like a fresh story. 314 MB of text → 78.7 M tokens.
+
+### The model
+
+Same architecture as before, scaled up and pointed at the bigger vocab:
+
+```
+dim=288  n_layers=6  n_heads=6  hidden_dim=768  vocab=4096  seq_len=256
+~7.16M parameters   (vs 2.26M for Shakespeare)
+```
+
+The shape mirrors Karpathy's stories15M, but with a 4096-vocab instead of
+32000 — most of stories15M's 15M params live in its huge embedding table;
+ours spends them on the transformer blocks instead. Trained on Apple MPS with
+AdamW + cosine LR; the training loop checkpoints the **val-best** weights so we
+keep the best generalizer, not the last (most-overfit) step. One epoch ≈ 4800
+iters, so a few thousand iters stays under a single pass — overfitting is a
+non-issue at this data:param ratio, the opposite of the Shakespeare regime.
+
+The payoff: real words, multi-sentence coherence, and simple narrative arcs
+("Once upon a time… One day… but then… and they were happy") — the structure
+TinyStories was designed to teach a small model.

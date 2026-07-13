@@ -6,6 +6,8 @@
 #   make bard       -> build + run OUR OWN trained model (Phase 2)
 #   make bardq      -> the same model, int8-quantized via runq.c (Phase 4)
 #   make train      -> train + export the Shakespeare model (needs .venv)
+#   make stories    -> run OUR TinyStories model (Phase 5: BPE, ~7M params)
+#   make storiesq   -> the TinyStories model, int8-quantized
 #   make clean
 
 CC      = cc
@@ -19,7 +21,7 @@ QBIN    = runq
 MODEL   = models/stories15M.bin
 TOKEN   = models/tokenizer.bin
 
-.PHONY: all debug demo bard bardq train web clean
+.PHONY: all debug demo bard bardq stories storiesq train web clean
 
 all: $(BIN) $(QBIN)
 
@@ -45,6 +47,13 @@ bard: $(BIN)
 bardq: $(QBIN)
 	./$(QBIN) models/shakespeare_q80.bin -z models/byte_tokenizer.bin -t 0.8 -i "ROMEO:"
 
+# Phase 5: ~7M-param model on TinyStories with a real 4096-vocab BPE tokenizer.
+stories: $(BIN)
+	./$(BIN) models/tinystories.bin -z models/tinystories_tokenizer.bin -t 0.85 -i "Once upon a time"
+
+storiesq: $(QBIN)
+	./$(QBIN) models/tinystories_q80.bin -z models/tinystories_tokenizer.bin -t 0.85 -i "Once upon a time"
+
 train:
 	.venv/bin/python src/tokenizer_export.py models/byte_tokenizer.bin
 	.venv/bin/python src/train.py --iters 750 --out models/shakespeare.bin --ckpt models/ckpt.pt
@@ -58,7 +67,8 @@ web: src/web_api.c src/run.c src/runq.c
 	  -sALLOW_MEMORY_GROWTH=1 -sENVIRONMENT=web \
 	  --no-entry
 	mkdir -p web/models
-	cp models/shakespeare.bin models/shakespeare_q80.bin models/byte_tokenizer.bin web/models/
+	cp models/shakespeare_q80.bin models/byte_tokenizer.bin web/models/
+	cp models/tinystories_q80.bin models/tinystories_tokenizer.bin web/models/
 
 clean:
 	rm -f $(BIN) $(QBIN)
