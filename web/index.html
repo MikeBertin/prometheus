@@ -159,6 +159,9 @@
     box-shadow:0 12px 30px -12px #000; opacity:0; pointer-events:none; transition:.16s; z-index:20; font-style:normal; }
   .term:hover::after { opacity:1; transform:translateX(-50%) translateY(0); }
 
+  pre.mini { margin:10px 0 4px; padding:10px 13px; background:var(--code-bg);
+    border:1px solid var(--border); border-radius:7px; font-size:12.5px;
+    line-height:1.55; color:var(--accent); white-space:pre-wrap; overflow-x:auto; }
   .code-wrap { position:relative; border-top:1px solid var(--border); }
   .code-wrap .file { display:block; font-size:11.5px; color:var(--muted); padding:8px 16px 0; background:var(--code-bg); }
   .copy { position:absolute; top:7px; right:9px; padding:3px 9px; font-size:10.5px;
@@ -217,33 +220,34 @@
       <section class="hero">
         <h1>A transformer language model, written from scratch in C —<br><span class="g">generating in your browser.</span></h1>
         <p class="sub">~600 lines of hand-written C: RMSNorm, rotary embeddings, multi-head attention with a KV
-          cache, a BPE tokenizer and a top-p sampler. Both models below were <em>trained from random
-          weights</em> — one on Shakespeare, one on ~300 MB of TinyStories — then <em>int8-quantized</em>,
-          and the same C engine, compiled to WebAssembly, runs whichever you pick. No libraries, no
-          frameworks, no API calls.</p>
+          cache, a BPE tokenizer and a top-p sampler. Three self-trained models — an
+          <em>instruction-tuned</em> one that follows a prompt, its TinyStories base, and a byte-level
+          Shakespeare model — all <em>int8-quantized</em> and run by the same C engine compiled to
+          WebAssembly. Pick one below. No libraries, no frameworks, no API calls.</p>
 
         <div class="crt">
           <div class="crt-bar"><i class="r"></i><i class="y"></i><i class="g"></i>
             <span id="engineline">runq.c · int8</span><span class="tps" id="tps"></span></div>
           <div class="modelsel" id="modelsel">
-            <button data-m="stories" class="on">📖 TinyStories · 7M · BPE-4096</button>
-            <button data-m="bard">🎭 Shakespeare · 2.3M · byte-level</button>
+            <button data-m="instruct" class="on">💬 Instruct · 7M</button>
+            <button data-m="stories">📖 TinyStories · 7M · BPE</button>
+            <button data-m="bard">🎭 Shakespeare · 2.3M · byte</button>
           </div>
           <div class="presets" id="presets"></div>
           <div class="controls">
-            <input type="text" id="prompt" value="ROMEO:" spellcheck="false"
-              placeholder="type a prompt — speaker names work best">
-            <label>temp <input type="range" id="temp" min="0" max="1.4" step="0.1" value="0.8">
-              <span id="tval">0.8</span></label>
+            <input type="text" id="prompt" value="Write a story using the words: dog, park, friend." spellcheck="false"
+              placeholder="type an instruction">
+            <label>temp <input type="range" id="temp" min="0" max="1.4" step="0.1" value="0.7">
+              <span id="tval">0.7</span></label>
             <button class="primary" id="go" disabled>▶ generate</button>
           </div>
-          <div class="crt-screen"><pre id="out"><span class="loading">loading 2.4 MB of int8 weights…</span></pre></div>
+          <div class="crt-screen"><pre id="out"><span class="loading">loading 8 MB of int8 weights…</span></pre></div>
         </div>
-        <p class="hint">Each passage <em>ends itself</em>: the model emits its beginning-of-sequence token when it
-          thinks the story (or speech) is done — it learned that from where BOS sat in the training data.
-          Temperature 0 is greedy and deterministic; crank it past 1.0 for chaos. Every token you see is a
-          <em>full forward pass</em> through all six transformer layers, in C, on your CPU — and the two
-          models even use different tokenizers (byte-level vs 4096-vocab BPE), swapped live in the engine.</p>
+        <p class="hint">The <b>Instruct</b> model wraps your text in a <code>User: … Assistant:</code> template and
+          writes a story to order — try naming three words. Each passage <em>ends itself</em>: the model emits its
+          beginning-of-sequence token when the turn is done. Temperature 0 is greedy and deterministic; crank it
+          past 1.0 for chaos. Every token is a <em>full forward pass</em> through all six layers, in C, on your
+          CPU — and the models even swap tokenizers (byte-level vs 4096-vocab BPE) live in the engine.</p>
       </section>
 
       <div class="wt-head">
@@ -725,12 +729,56 @@ x = np.stack([data[i     : i+seq_len    ] for i in ix])
 y = np.stack([data[i + 1 : i+seq_len + 1] for i in ix])   # targets = inputs shifted by one</code></pre></div>
         </div>
 
+        <div class="phase-row"><span class="label">Instruction tuning</span></div>
+
+        <div class="step" id="s20" data-n="20" data-phase="instruct">
+          <header>
+            <span class="tag">20 · SFT</span>
+            <h3>Teaching it to follow, not just continue</h3>
+            <p>The base model <em>continues</em> text; the <b>💬 Instruct</b> model at the top <em>follows an
+              instruction</em>. Same 7M weights, further trained ("supervised fine-tuning") on a chat template
+              built from the stories themselves — pull content words out of a story, and the instruction becomes
+              "write a story using these words," with the story as the target answer:</p>
+            <pre class="mini">User: Write a story using the words: dragon, cake, brave.
+Assistant: &lt;the story&gt;&lt;/s&gt;</pre>
+            <p>The one genuinely new idea is <b>loss masking</b>. We do <em>not</em> want the model learning to
+              generate the instruction — only the response. So every target position inside the prompt is set to
+              <code>-100</code>, which PyTorch's cross-entropy silently ignores. The gradient only ever flows
+              from the answer. And — the theme of this whole project once more — <em>run.c is unchanged</em>: the
+              template is plain text, and BOS is still the stop token, so the model just learns to end its turn.</p>
+          </header>
+          <div class="code-wrap"><span class="file">src/finetune.py — mask the prompt, train on the answer</span>
+          <pre><code data-lang="py">full = prompt_ids + response_ids + [BOS]     # BOS = "end of turn"
+x, y = full[:-1], full[1:]
+# only positions predicting a RESPONSE token count toward the loss:
+for i in range(len(prompt_ids) - 1):
+    y[i] = -100                              # cross_entropy ignores these
+# ...later, unchanged: loss = F.cross_entropy(logits, y)  # ignore_index=-100</code></pre></div>
+        </div>
+
+        <div class="step" id="s21" data-n="21" data-phase="instruct">
+          <header>
+            <span class="tag">21 · honesty</span>
+            <h3>What 7M parameters can and can't do</h3>
+            <p>Set expectations: this is not an assistant. It's a demonstration that the <em>mechanism</em> works.
+              Ask for a story and it obeys the <em>format</em> and <em>theme</em> every time — "about a robot"
+              reliably gets you a robot. Injecting specific requested words is harder: common ones
+              (dog, park, friend) usually land, rare ones often don't — about <b id="wordrate">24%</b> of random
+              content words make it in (measured on held-out prompts). It has no facts, no reasoning, no memory
+              across turns; it knows only the small world of TinyStories.</p>
+            <p>Two things it does <em>not</em> use, that real instruct models do: <b>LoRA/PEFT</b> (we
+              full-fine-tune all 7M weights because at this size it's free; large models train a small adapter
+              instead), and <b>RLHF/DPO</b> (a second preference-alignment stage after SFT). What's here is
+              step one — supervised fine-tuning — which is where instruction-following actually comes from.</p>
+          </header>
+        </div>
+
       </div>
 
       <footer>
-        A Llama-style transformer written from scratch in C — trained with a from-scratch PyTorch twin
-        (Shakespeare, and TinyStories with a from-scratch BPE tokenizer), exported to a flat binary,
-        int8-quantized, and running live in this page via WebAssembly.<br>
+        A Llama-style transformer written from scratch in C — pretrained on TinyStories with a from-scratch
+        BPE tokenizer, instruction-tuned with loss masking, exported to a flat binary, int8-quantized, and
+        running live in this page via WebAssembly.<br>
         Inspired by Andrej Karpathy's <a href="https://github.com/karpathy/llama2.c">llama2.c</a>.
         No frameworks, no inference libraries, no API — the fire is running on your CPU.
       </footer>
@@ -745,12 +793,25 @@ y = np.stack([data[i + 1 : i+seq_len + 1] for i in ix])   # targets = inputs shi
           promptEl = $("prompt"), tempEl = $("temp"), tvalEl = $("tval"), tpsEl = $("tps");
     tempEl.oninput = () => tvalEl.textContent = (+tempEl.value).toFixed(1);
 
-    // ── the two models this one WASM engine can serve ────────────────────
+    // ── the models this one WASM engine can serve (hot-swapped live) ─────
     const MODELS = {
+      instruct: {
+        engine: "runq.c · 7.2M params · int8 · instruct-tuned",
+        model: "models/tinystories_instruct_q80.bin", tok: "models/tinystories_tokenizer.bin",
+        size: "8 MB", temp: 0.7, prompt: "Write a story using the words: dog, park, friend.",
+        placeholder: "type an instruction — e.g. Write a story using the words: …",
+        // the chat template the model was fine-tuned on; BOS still ends the turn
+        wrap: p => "User: " + p + "\nAssistant:",
+        presets: ["Write a story using the words: dog, park, friend.",
+                  "Write a story about a robot.",
+                  "Write a story about a lost puppy.",
+                  "Tell me a story."],
+      },
       stories: {
         engine: "runq.c · 7.2M params · int8 · BPE-4096",
         model: "models/tinystories_q80.bin", tok: "models/tinystories_tokenizer.bin",
         size: "8 MB", temp: 0.85, prompt: "Once upon a time",
+        placeholder: "type a prompt — the model continues it",
         presets: ["Once upon a time", "One day, a little girl", "Tom and Lily went to the",
                   "The dragon was very", ""],
       },
@@ -758,10 +819,11 @@ y = np.stack([data[i + 1 : i+seq_len + 1] for i in ix])   # targets = inputs shi
         engine: "runq.c · 2.26M params · int8 · byte-level",
         model: "models/shakespeare_q80.bin", tok: "models/byte_tokenizer.bin",
         size: "2.4 MB", temp: 0.8, prompt: "ROMEO:",
+        placeholder: "type a prompt — speaker names work best",
         presets: ["ROMEO:", "JULIET:", "KING RICHARD II:", "First Citizen:", ""],
       },
     };
-    let curModel = "stories";
+    let curModel = "instruct";
 
     function buildPresets(key) {
       const box = $("presets");
@@ -812,6 +874,7 @@ y = np.stack([data[i + 1 : i+seq_len + 1] for i in ix])   # targets = inputs shi
       $("engineline").textContent = m.engine;
       buildPresets(key);
       promptEl.value = m.prompt; tempEl.value = m.temp; tempEl.oninput();
+      promptEl.placeholder = m.placeholder || "type a prompt";
       document.querySelectorAll("#modelsel button")
         .forEach(b => b.classList.toggle("on", b.dataset.m === key));
 
@@ -823,8 +886,9 @@ y = np.stack([data[i + 1 : i+seq_len + 1] for i in ix])   # targets = inputs shi
       M.FS.writeFile(key + ".tok", tok);
       promReload(key + ".bin", key + ".tok");
 
-      // benchmark the raw engine flat-out (silent)
-      promStart(m.prompt || "The", 1.0, 0.9, 12345, 96);
+      // benchmark the raw engine flat-out (silent), through the chat template
+      const bp = m.wrap ? m.wrap(m.prompt) : (m.prompt || "The");
+      promStart(bp, 1.0, 0.9, 12345, 96);
       const b0 = performance.now(); let bn = 0;
       while (!promDone()) { promNext(); bn++; }
       engineTps = Math.round(bn / ((performance.now() - b0) / 1000));
@@ -871,7 +935,8 @@ y = np.stack([data[i + 1 : i+seq_len + 1] for i in ix])   # targets = inputs shi
     function generate() {
       if (!ready) return;
       cancelAnimationFrame(raf);
-      const prompt = promptEl.value;
+      const m = MODELS[curModel];
+      const prompt = m.wrap ? m.wrap(promptEl.value) : promptEl.value;
       const seed = (Math.random() * 0x7fffffff) >>> 0;
       promStart(prompt, +tempEl.value, 0.9, seed, 256);
       out.innerHTML = "";
@@ -907,7 +972,7 @@ y = np.stack([data[i + 1 : i+seq_len + 1] for i in ix])   # targets = inputs shi
     promptEl.addEventListener("keydown", e => { if (e.key === "Enter") generate(); });
 
     // ── sidebar nav, scroll-spy, reveal, progress, copy, highlighter ─────
-    const PHASES = { loop:"The Loop", fwd:"Forward Pass", txt:"Text ⇄ Tokens", train:"Training", quant:"Quantization", scale:"Scale-up" };
+    const PHASES = { loop:"The Loop", fwd:"Forward Pass", txt:"Text ⇄ Tokens", train:"Training", quant:"Quantization", scale:"Scale-up", instruct:"Instruction tuning" };
     const nav = $("nav");
     let curPhase = null;
     document.querySelectorAll(".step").forEach(step => {

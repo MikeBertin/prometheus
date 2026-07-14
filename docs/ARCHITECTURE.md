@@ -228,3 +228,67 @@ non-issue at this data:param ratio, the opposite of the Shakespeare regime.
 The payoff: real words, multi-sentence coherence, and simple narrative arcs
 ("Once upon a time… One day… but then… and they were happy") — the structure
 TinyStories was designed to teach a small model.
+
+---
+
+## Phase 6 — instruction fine-tuning (`finetune.py`)
+
+The TinyStories base model *continues* text. Phase 6 turns it into a model
+that *follows an instruction* — the difference between a raw language model
+and something you can actually prompt. This is **supervised fine-tuning
+(SFT)**, the first stage of how real assistants are built.
+
+Three techniques, none of which touch `run.c`:
+
+### 1. A chat template (plain text)
+Every SFT example is formatted as:
+```
+<s>User: <instruction>
+Assistant: <response></s>
+```
+No new special tokens — `User:`/`Assistant:` are ordinary text the BPE
+tokenizer already encodes, and BOS (id 1) is still the stop token `run.c`
+halts on, so the model learns to end its turn. The demo wraps whatever you
+type in this same template before handing it to the engine.
+
+### 2. Loss masking (the one genuinely new idea)
+We only want the model to learn to generate the **response**, not to parrot
+the instruction. So when we build the `(input, target)` pair, every target
+position that sits inside the prompt is set to `-100` — which is PyTorch's
+`cross_entropy` `ignore_index`, silently dropped from the loss. The gradient
+flows *only* from the answer tokens:
+```python
+full = prompt_ids + response_ids + [BOS]
+x, y = full[:-1], full[1:]
+for i in range(len(prompt_ids) - 1):
+    y[i] = -100          # ignored by cross_entropy
+```
+Because `model.py`'s forward already calls `F.cross_entropy` with the default
+`ignore_index=-100`, this needed **zero model changes** — just masked targets.
+
+### 3. SFT from the pretrained base (transfer learning)
+We load `models/tinystories.pt` and keep training — we are *not* starting from
+random weights. The base already writes fluent stories; fine-tuning only
+teaches the instruction *format*. Hence a low LR (5e-4) and a few epochs over
+~50k examples, versus thousands of steps of pretraining.
+
+### The data is synthesized from the corpus
+There's no external instruction dataset. `finetune.py` builds pairs *from the
+stories themselves*: pull content words out of a story, and the instruction
+becomes "write a story using these words," with the story as the target
+answer. This keeps everything in-domain for the TinyStories tokenizer, and
+makes the task **verifiable** — we can measure what fraction of requested
+words actually appear in generations (the honest quality metric, reported at
+the end of a run).
+
+### What this is and isn't
+Full-fine-tuning all 7M parameters is fine at this scale; real instruct models
+use **LoRA/PEFT** (train a small adapter, freeze the rest) to avoid updating
+billions of weights, and follow SFT with a preference-alignment stage
+(**RLHF/DPO**). What's here is step one — where instruction-following actually
+originates. At 7M params it has no facts, no reasoning, no cross-turn memory;
+it reliably obeys the *format* and *theme* (ask for a robot, get a robot), but
+injecting specific requested words is hit-or-miss — ~24% of random content
+words land (common ones far more often than rare ones), measured on held-out
+prompts. The point is that the mechanism is the same one that scales up to real
+assistants.

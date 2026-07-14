@@ -54,6 +54,11 @@ stories: $(BIN)
 storiesq: $(QBIN)
 	./$(QBIN) models/tinystories_q80.bin -z models/tinystories_tokenizer.bin -t 0.85 -i "Once upon a time"
 
+# Phase 6: the instruction-tuned model. Prompt uses the chat template.
+chat: $(BIN)
+	./$(BIN) models/tinystories_instruct.bin -z models/tinystories_tokenizer.bin -t 0.7 \
+	  -i "$$(printf 'User: Write a story using the words: dragon, cake, brave.\nAssistant:')"
+
 train:
 	.venv/bin/python src/tokenizer_export.py models/byte_tokenizer.bin
 	.venv/bin/python src/train.py --iters 750 --out models/shakespeare.bin --ckpt models/ckpt.pt
@@ -69,6 +74,7 @@ web: src/web_api.c src/run.c src/runq.c
 	mkdir -p web/models
 	cp models/shakespeare_q80.bin models/byte_tokenizer.bin web/models/
 	cp models/tinystories_q80.bin models/tinystories_tokenizer.bin web/models/
+	cp models/tinystories_instruct_q80.bin web/models/
 
 clean:
 	rm -f $(BIN) $(QBIN)

@@ -8,9 +8,10 @@ tokenizer and a top-p sampler. Trained from random weights by its own from-scrat
 PyTorch twin, exported to a flat binary of floats, int8-quantized, and running
 **live in your browser** via WebAssembly.
 
-Two self-trained models ship in the demo, switchable live in the same C engine: a
-**7M-parameter model** trained on ~300 MB of TinyStories with a from-scratch
-4096-vocab BPE tokenizer, and the original **2.3M byte-level Shakespeare** model.
+Three self-trained models ship in the demo, switchable live in the same C engine: an
+**instruction-tuned** model that follows a prompt, its **7M-parameter TinyStories base**
+(trained on ~300 MB with a from-scratch 4096-vocab BPE tokenizer), and the original
+**2.3M byte-level Shakespeare** model.
 
 **▶ Live demo + annotated walkthrough: [mikebertin.github.io/prometheus](https://mikebertin.github.io/prometheus/)**
 
@@ -38,6 +39,7 @@ src/export.py            serializes weights in the exact order run.c mmaps them
 src/tokenizer_export.py  byte-level tokenizer (vocab 259) in run.c's format
 src/bpe.py               from-scratch byte-level BPE — trains merges, run.c's format
 src/prepare_data.py      tokenizes a corpus once into a uint16 memmap for training
+src/finetune.py          instruction fine-tune (SFT) — chat template + loss masking
 src/web_api.c            thin emscripten wrapper — the same run.c, compiled to WASM
 web/                     the live demo page + walkthrough (tracked in full,
                          including both trained models, so it deploys as-is)
@@ -111,6 +113,25 @@ pair" loop — which *is* BPE — teaching it a real tokenizer needed **zero C c
 `score = -rank`, and the engine reproduces our tokenization exactly. "Once upon a
 time" goes from 16 byte-tokens to ~4, so the model's 256-token context reaches four
 times deeper into a story.
+
+### Instruction fine-tune: from continuing to following
+
+```sh
+# turns the base model into one that follows an instruction (chat template + SFT)
+.venv/bin/python src/finetune.py                    # -> models/tinystories_instruct.bin
+make chat                                            # "Write a story using the words: …"
+```
+
+The base model *continues* text; the fine-tuned one *follows* a prompt. `finetune.py`
+does supervised fine-tuning from the pretrained checkpoint using a plain-text chat
+template (`User: … / Assistant: …`) and — the one new idea — **loss masking**: only
+the response tokens count toward the loss (prompt positions are set to `-100`, which
+`cross_entropy` ignores), so the model learns to *answer*, not to echo the question.
+The instruction data is synthesized from the corpus itself (extract a story's content
+words → "write a story using these words"), which makes it in-domain and verifiable:
+finetune.py reports what fraction of requested words actually show up. Still zero C
+changes — the template is text, BOS still ends the turn. At 7M params it's a
+demonstration of the *mechanism*, not an assistant; real models add LoRA and RLHF.
 
 ## int8 quantization (`runq.c`)
 
