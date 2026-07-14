@@ -229,7 +229,8 @@
           <div class="crt-bar"><i class="r"></i><i class="y"></i><i class="g"></i>
             <span id="engineline">runq.c · int8</span><span class="tps" id="tps"></span></div>
           <div class="modelsel" id="modelsel">
-            <button data-m="instruct" class="on">💬 Instruct · 7M</button>
+            <button data-m="aligned" class="on">🎯 Aligned · 7M · DPO</button>
+            <button data-m="instruct">💬 Instruct · 7M · SFT</button>
             <button data-m="stories">📖 TinyStories · 7M · BPE</button>
             <button data-m="bard">🎭 Shakespeare · 2.3M · byte</button>
           </div>
@@ -768,9 +769,54 @@ for i in range(len(prompt_ids) - 1):
               across turns; it knows only the small world of TinyStories.</p>
             <p>Two things it does <em>not</em> use, that real instruct models do: <b>LoRA/PEFT</b> (we
               full-fine-tune all 7M weights because at this size it's free; large models train a small adapter
-              instead), and <b>RLHF/DPO</b> (a second preference-alignment stage after SFT). What's here is
-              step one — supervised fine-tuning — which is where instruction-following actually comes from.</p>
+              instead), and <b>RLHF/DPO</b> (a second preference-alignment stage after SFT). SFT is step
+              one — where instruction-following comes from. That 24% is the number the next phase attacks.</p>
           </header>
+        </div>
+
+        <div class="phase-row"><span class="label">Alignment — Preference Optimization (DPO)</span></div>
+
+        <div class="step" id="s22" data-n="22" data-phase="align">
+          <header>
+            <span class="tag">22 · preferences</span>
+            <h3>Teaching taste without a teacher</h3>
+            <p>SFT taught the model to answer. Alignment teaches it which answer is <em>better</em>. Real RLHF
+              collects pairs where a human picked the better of two responses; we can't hand-label thousands,
+              so we use a <span class="term" data-tip="Reinforcement Learning from AI Feedback: the preference label comes from a rule or a model, not a human. Here the rule is 'did the story use the requested words?' — the exact thing Phase 6 measured.">programmatic
+              judge</span> — which makes this <b>RLAIF</b>, but the optimizer downstream is identical.</p>
+            <p>The judge is Phase 6's weakness itself: <em>did the story use the requested words?</em> For each
+              prompt we sample several completions <em>from the SFT model</em>, then pair the one using the most
+              requested words (<b>chosen</b>) against the one using the fewest (<b>rejected</b>). The preferences
+              are the model's own outputs, sorted by a rule it will now be trained to satisfy.</p>
+          </header>
+          <div class="code-wrap"><span class="file">src/gen_prefs.py — the judge sorts the model's own samples</span>
+          <pre><code data-lang="py">completions = sample_k(model, prompt_ids, k=8)      # on-policy: the SFT model's own
+scored = [(sum(w in text.lower() for w in words), text)  # reward = # requested words present
+          for text in completions]
+scored.sort()
+rejected, chosen = scored[0][1], scored[-1][1]      # worst vs best — a preference pair</code></pre></div>
+        </div>
+
+        <div class="step" id="s23" data-n="23" data-phase="align">
+          <header>
+            <span class="tag">23 · DPO</span>
+            <h3>Two models, one nudge</h3>
+            <p>Classic RLHF trains a reward model then optimizes it with RL (PPO). <b>DPO</b> skips both: it
+              optimizes the preference pairs directly. Keep two copies of the SFT model — a trainable
+              <b>policy</b> and a <span class="term" data-tip="Without the frozen reference anchoring it, the policy could win every preference by collapsing into degenerate text. The reference keeps it a story.">frozen
+              <b>reference</b></span> — and push the policy to prefer chosen over rejected, but only <em>beyond</em>
+              what the reference already prefers. One line of loss, no reward model, no RL loop.</p>
+            <p>The result, both numbers measured identically on the same held-out prompts: word-inclusion
+              went from <b id="dpo-before">22%</b> (SFT) to <b id="dpo-after">45%</b> (DPO) — roughly doubled; the
+              model learned to actually use the words it's given. The cost, visible in its output, is the
+              <span class="term" data-tip="Push alignment too hard and the policy games the reward — cramming or repeating the words at the expense of story quality. The reference model and a small beta are what hold that back.">alignment
+              tax</span>: reward-hacking that trades fluency for score. <em>Switch between 💬 Instruct and 🎯 Aligned
+              above and give both the same three words — the difference is DPO.</em></p>
+          </header>
+          <div class="code-wrap"><span class="file">src/dpo.py — the entire alignment objective</span>
+          <pre><code data-lang="py">pol = logp(policy, chosen) - logp(policy, rejected)   # does the policy prefer chosen?
+ref = logp(ref,    chosen) - logp(ref,    rejected)   # did the frozen SFT model already?
+loss = -logsigmoid(beta * (pol - ref)).mean()         # reward only the NEW preference</code></pre></div>
         </div>
 
       </div>
@@ -795,14 +841,28 @@ for i in range(len(prompt_ids) - 1):
 
     // ── the models this one WASM engine can serve (hot-swapped live) ─────
     const MODELS = {
+      aligned: {
+        engine: "runq.c · 7.2M params · int8 · DPO-aligned",
+        model: "models/tinystories_aligned_q80.bin", tok: "models/tinystories_tokenizer.bin",
+        size: "8 MB", temp: 0.7, prompt: "Write a story using the words: dragon, cake, brave.",
+        placeholder: "type an instruction — e.g. Write a story using the words: …",
+        // same chat template as the SFT model — DPO only nudged the weights,
+        // it didn't change the format. Compare it against 💬 Instruct on the
+        // SAME words: alignment should make more of them actually appear.
+        wrap: p => "User: " + p + "\nAssistant:",
+        presets: ["Write a story using the words: dragon, cake, brave.",
+                  "Write a story using the words: moon, boat, secret.",
+                  "Write a story using the words: dog, park, friend.",
+                  "Write a story about a robot."],
+      },
       instruct: {
-        engine: "runq.c · 7.2M params · int8 · instruct-tuned",
+        engine: "runq.c · 7.2M params · int8 · instruct-tuned (SFT only)",
         model: "models/tinystories_instruct_q80.bin", tok: "models/tinystories_tokenizer.bin",
-        size: "8 MB", temp: 0.7, prompt: "Write a story using the words: dog, park, friend.",
+        size: "8 MB", temp: 0.7, prompt: "Write a story using the words: dragon, cake, brave.",
         placeholder: "type an instruction — e.g. Write a story using the words: …",
         // the chat template the model was fine-tuned on; BOS still ends the turn
         wrap: p => "User: " + p + "\nAssistant:",
-        presets: ["Write a story using the words: dog, park, friend.",
+        presets: ["Write a story using the words: dragon, cake, brave.",
                   "Write a story about a robot.",
                   "Write a story about a lost puppy.",
                   "Tell me a story."],
@@ -823,7 +883,7 @@ for i in range(len(prompt_ids) - 1):
         presets: ["ROMEO:", "JULIET:", "KING RICHARD II:", "First Citizen:", ""],
       },
     };
-    let curModel = "instruct";
+    let curModel = "aligned";
 
     function buildPresets(key) {
       const box = $("presets");
@@ -972,7 +1032,7 @@ for i in range(len(prompt_ids) - 1):
     promptEl.addEventListener("keydown", e => { if (e.key === "Enter") generate(); });
 
     // ── sidebar nav, scroll-spy, reveal, progress, copy, highlighter ─────
-    const PHASES = { loop:"The Loop", fwd:"Forward Pass", txt:"Text ⇄ Tokens", train:"Training", quant:"Quantization", scale:"Scale-up", instruct:"Instruction tuning" };
+    const PHASES = { loop:"The Loop", fwd:"Forward Pass", txt:"Text ⇄ Tokens", train:"Training", quant:"Quantization", scale:"Scale-up", instruct:"Instruction tuning", align:"Alignment (DPO)" };
     const nav = $("nav");
     let curPhase = null;
     document.querySelectorAll(".step").forEach(step => {

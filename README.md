@@ -8,10 +8,11 @@ tokenizer and a top-p sampler. Trained from random weights by its own from-scrat
 PyTorch twin, exported to a flat binary of floats, int8-quantized, and running
 **live in your browser** via WebAssembly.
 
-Three self-trained models ship in the demo, switchable live in the same C engine: an
-**instruction-tuned** model that follows a prompt, its **7M-parameter TinyStories base**
-(trained on ~300 MB with a from-scratch 4096-vocab BPE tokenizer), and the original
-**2.3M byte-level Shakespeare** model.
+Four self-trained models ship in the demo, switchable live in the same C engine: a
+**DPO-aligned** model and the **instruction-tuned** model it came from (a live A/B on
+preference alignment), their shared **7M-parameter TinyStories base** (trained on ~300 MB
+with a from-scratch 4096-vocab BPE tokenizer), and the original **2.3M byte-level
+Shakespeare** model.
 
 **▶ Live demo + annotated walkthrough: [mikebertin.github.io/prometheus](https://mikebertin.github.io/prometheus/)**
 
@@ -40,6 +41,8 @@ src/tokenizer_export.py  byte-level tokenizer (vocab 259) in run.c's format
 src/bpe.py               from-scratch byte-level BPE — trains merges, run.c's format
 src/prepare_data.py      tokenizes a corpus once into a uint16 memmap for training
 src/finetune.py          instruction fine-tune (SFT) — chat template + loss masking
+src/gen_prefs.py         builds on-policy preference pairs (RLAIF judge) for DPO
+src/dpo.py               Direct Preference Optimization — policy vs frozen reference
 src/web_api.c            thin emscripten wrapper — the same run.c, compiled to WASM
 web/                     the live demo page + walkthrough (tracked in full,
                          including both trained models, so it deploys as-is)
@@ -131,7 +134,27 @@ The instruction data is synthesized from the corpus itself (extract a story's co
 words → "write a story using these words"), which makes it in-domain and verifiable:
 finetune.py reports what fraction of requested words actually show up. Still zero C
 changes — the template is text, BOS still ends the turn. At 7M params it's a
-demonstration of the *mechanism*, not an assistant; real models add LoRA and RLHF.
+demonstration of the *mechanism*, not an assistant.
+
+### Preference alignment: DPO (the RLHF stage)
+
+```sh
+# 1. build on-policy preference pairs judged by "did it use the words?"
+.venv/bin/python src/gen_prefs.py --prompts 1200 --k 8   # -> data/prefs.jsonl
+# 2. Direct Preference Optimization from the SFT model
+.venv/bin/python src/dpo.py --prefs data/prefs.jsonl     # -> models/tinystories_aligned.bin
+```
+
+SFT taught the model to answer; **alignment** teaches it which answer is *better* — the
+stage that turns an instruct model into an assistant. We aim it at Phase 6's honest
+weakness (~24% word-inclusion). `gen_prefs.py` samples K completions from the SFT model
+and pairs the one using the most requested words (*chosen*) against the fewest
+(*rejected*) — a programmatic judge, so this is **RLAIF**, but the optimizer is identical.
+`dpo.py` runs **DPO**: a trainable *policy* and a frozen *reference* (the SFT model), with
+one line of loss that rewards only the preferences the reference didn't already hold — no
+reward model, no PPO loop. Word-inclusion climbs measurably; the demo's 🎯 Aligned vs 💬
+Instruct switch is a live A/B on the same words. Watch for the *alignment tax* — push too
+hard and the policy reward-hacks fluency away. Zero C changes; DPO only moves the weights.
 
 ## int8 quantization (`runq.c`)
 

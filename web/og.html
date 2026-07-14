@@ -45,19 +45,19 @@
   <div class="left">
     <div class="flame">🔥 <b>PROMETHEUS</b></div>
     <h1>A language model from scratch in C, <span class="g">running in your browser.</span></h1>
-    <p class="sub">The full transformer forward pass, hand-written and annotated — pretrained, then instruction-tuned, compiled to WASM.</p>
+    <p class="sub">The full transformer forward pass, hand-written and annotated — pretrained, instruction-tuned, then DPO-aligned, compiled to WASM.</p>
     <div class="chips">
       <span class="chip hot">~600 lines of C</span>
       <span class="chip">RMSNorm · RoPE · SwiGLU</span>
       <span class="chip">from-scratch BPE</span>
-      <span class="chip">instruction-tuned</span>
+      <span class="chip">SFT + DPO aligned</span>
       <span class="chip hot">7M params, self-trained</span>
       <span class="chip">int8 · in your browser</span>
     </div>
   </div>
   <div class="crt">
     <div class="bar"><i class="r"></i><i class="y"></i><i class="g"></i>
-      <span>runq.c · int8 · instruct</span><span class="tps" id="ogtps">3,500 tok/s</span></div>
+      <span>runq.c · int8 · DPO-aligned</span><span class="tps" id="ogtps">3,400 tok/s</span></div>
     <div class="screen"><span class="p">User:</span> Write a story using the
 words: dog, park, friend.
 <span class="p">Assistant:</span> Once upon a time, there
