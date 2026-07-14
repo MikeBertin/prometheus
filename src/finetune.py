@@ -126,7 +126,8 @@ def build_examples(stories, tok, seq_len, max_examples):
 @torch.no_grad()
 def generate_response(model, tok, instruction, device, max_new=200, temperature=0.7):
     """Prompt the model with the chat template and stop at BOS."""
-    model.eval()
+    was_training = model.training   # restore, don't force-.train() — a frozen
+    model.eval()                    # reference passed in must stay frozen
     prompt = f"User: {instruction}\nAssistant:"
     ids = tok.encode(prompt, bos=True)
     idx = torch.tensor([ids], dtype=torch.int64, device=device)
@@ -140,7 +141,8 @@ def generate_response(model, tok, instruction, device, max_new=200, temperature=
             break
         out.append(t)
         idx = torch.cat([idx, nxt], dim=1)
-    model.train()
+    if was_training:
+        model.train()
     return tok.decode(out).strip()
 
 

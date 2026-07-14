@@ -37,25 +37,35 @@ from finetune import content_words, BOS
 @torch.no_grad()
 def sample_k(model, prompt_ids, k, device, max_new=180, temperature=0.9):
     """Draw k independent completions of one prompt. Returns list of k token
-    lists (BOS-terminated turns, with the BOS stripped)."""
+    lists (BOS-terminated turns, with the BOS stripped).
+
+    Rows that hit BOS are DROPPED from the batch so we don't keep forwarding
+    finished sequences — the active rows always share a length, so the tensor
+    stays rectangular while it shrinks."""
+    was_training = model.training
     model.eval()
     idx = torch.tensor([prompt_ids] * k, dtype=torch.int64, device=device)
-    finished = torch.zeros(k, dtype=torch.bool, device=device)
     outs = [[] for _ in range(k)]
+    active = list(range(k))            # original slot for each row of idx
     for _ in range(max_new):
+        if not active:
+            break
         logits, _ = model(idx[:, -model.args.max_seq_len:])
         probs = torch.softmax(logits[:, -1, :] / temperature, dim=-1)
-        nxt = torch.multinomial(probs, 1)                 # (k, 1)
-        for i in range(k):
-            if not finished[i]:
-                t = int(nxt[i])
-                if t == BOS:
-                    finished[i] = True
-                else:
-                    outs[i].append(t)
+        nxt = torch.multinomial(probs, 1)                 # (len(active), 1)
         idx = torch.cat([idx, nxt], dim=1)
-        if bool(finished.all()):
-            break
+        keep_rows, keep_slots = [], []
+        for row, slot in enumerate(active):
+            if int(nxt[row]) == BOS:
+                continue                                  # finished — drop it
+            outs[slot].append(int(nxt[row]))
+            keep_rows.append(row)
+            keep_slots.append(slot)
+        if len(keep_rows) < len(active):
+            idx = idx[keep_rows]                          # shrink to survivors
+        active = keep_slots
+    if was_training:
+        model.train()
     return outs
 
 

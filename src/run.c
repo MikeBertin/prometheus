@@ -215,7 +215,10 @@ void softmax(float* x, int size) {
 
 /* Matrix-vector product: out = W @ x, where W is (d, n) row-major and x is (n,).
  * This is the single hottest operation in the whole network — every projection
- * and the final classifier is a matmul. Each output row is a dot product. */
+ * and the final classifier is a matmul. Each output row is a dot product.
+ * The rows are independent, so this loop is embarrassingly parallel: the pragma
+ * below splits it across cores IF you compile with -fopenmp. The default build
+ * doesn't, so it's a no-op there — left in as the one honest place to add it. */
 void matmul(float* out, float* x, float* w, int n, int d) {
     #pragma omp parallel for
     for (int i = 0; i < d; i++) {
