@@ -26,6 +26,7 @@ rejected one:  loss = -log sigmoid(r(chosen) - r(rejected)).
 import argparse
 import json
 import random
+import re
 import time
 
 import torch
@@ -34,7 +35,7 @@ import torch.nn.functional as F
 
 from model import Transformer, ModelArgs
 from bpe import Tokenizer, load_merges
-from finetune import BOS
+from finetune import BOS, content_words
 
 
 class RewardModel(nn.Module):
@@ -64,6 +65,47 @@ def encode_side(tok, prompt, response, seq_len):
     return ids
 
 
+def build_corpus_pairs(corpus_path, tok, seq_len, n, seed=0):
+    """GRADED preference pairs straight from the corpus — no generation, so
+    thousands appear in seconds.
+
+    The trick: hold the response (story A) fixed and vary the REQUEST. If A
+    contains words {a,b,c,d}, then asking for {a,b,c} is 3/3 satisfied, asking
+    for {a,y,z} (y,z absent) is 1/3. So a pair (request with more of its words
+    present) > (request with fewer) teaches the reward model to grade by HOW
+    MANY requested words appear — the graded signal all-or-none pairs never
+    gave it, and exactly what RLOO needs to climb instead of hack."""
+    text = open(corpus_path, encoding="utf-8", errors="replace").read()
+    stories = [s.strip() for s in re.split(r"<\|endoftext\|>", text) if s.strip()]
+    rng = random.Random(seed)
+    rng.shuffle(stories)
+    stories = stories[400:]                        # keep clear of the eval slice
+    vocab = set()                                  # content-word pool for negatives
+    for s in stories[:3000]:
+        vocab.update(content_words(s, 6))
+    vocab = list(vocab)
+
+    pairs, i = [], 0
+    while len(pairs) < n and i < len(stories):
+        A = stories[i]; i += 1
+        low = A.lower()
+        present = content_words(A, 8)              # words that ARE in A
+        negs = [w for w in rng.sample(vocab, min(30, len(vocab))) if w not in low]
+        if len(present) < 3 or len(negs) < 3:
+            continue
+
+        def request(c):                            # c of the 3 requested words are in A
+            words = rng.sample(present, c) + rng.sample(negs, 3 - c)
+            rng.shuffle(words)
+            return f"Write a story using the words: {', '.join(words)}."
+
+        c_hi = rng.randint(1, 3)
+        c_lo = rng.randint(0, c_hi - 1)            # strictly fewer present -> clear preference
+        pairs.append((encode_side(tok, request(c_hi), A, seq_len),
+                      encode_side(tok, request(c_lo), A, seq_len)))
+    return pairs
+
+
 def collate(rows, device, pad=0):
     T = max(len(r) for r in rows)
     tok = torch.full((len(rows), T), pad, dtype=torch.int64, device=device)
@@ -78,6 +120,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sft", default="models/tinystories_instruct.pt")
     ap.add_argument("--prefs", default="data/prefs.jsonl")
+    ap.add_argument("--corpus", default="data/tinystories_train_300mb.txt")
+    ap.add_argument("--corpus-pairs", type=int, default=0,
+                    help="augment TRAIN with N corpus-constructed pairs (Phase 10)")
     ap.add_argument("--merges", default="models/tinystories.merges")
     ap.add_argument("--out", default="models/reward_model.pt")
     ap.add_argument("--epochs", type=int, default=3)
@@ -106,8 +151,16 @@ def main():
             for p in pairs]
     random.shuffle(data)
     n_val = int(len(data) * args.val_frac)
+    # Val stays the ON-POLICY graded pairs (real SFT outputs) so accuracy is
+    # honest; corpus pairs only augment TRAIN.
     val, train = data[:n_val], data[n_val:]
-    print(f"pairs: {len(train)} train / {len(val)} val")
+    if args.corpus_pairs:
+        extra = build_corpus_pairs(args.corpus, tok, margs.max_seq_len,
+                                   args.corpus_pairs, seed=args.seed)
+        train = train + extra
+        print(f"augmented train with {len(extra):,} corpus-constructed pairs")
+    random.shuffle(train)
+    print(f"pairs: {len(train)} train / {len(val)} val (val = on-policy, graded)")
 
     opt = torch.optim.AdamW(rm.parameters(), lr=args.lr, betas=(0.9, 0.95), weight_decay=0.01)
 

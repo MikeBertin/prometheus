@@ -897,22 +897,46 @@ loss = -logsigmoid(r_chosen - r_rejected).mean()   # chosen should score higher<
               <span class="term" data-tip="Advantage = this sample's reward minus the mean reward of the OTHER k-1 samples for the same prompt. An unbiased, low-variance baseline — no value network to train.">mean
               of the others</span>. That leave-one-out baseline is the whole variance-reduction trick — no
               value network, no GAE, no clip. One REINFORCE update per rollout, KL-tethered to the reference.</p>
-            <p>The four-way result on the held-out test: SFT <b>22%</b> → PPO <b>~22%</b> →
-              RLOO <b id="rloo-after">~24%</b> → DPO <b>45%</b>. <span id="rloo-verdict">And here's the twist:
-              RLOO's machinery worked <em>perfectly</em> — the reward-model score <b>tripled</b> (−0.6 → +2.4)
-              and KL to the reference <b>exploded 9×</b> as the policy chased it. But the true metric barely
-              budged. The policy <b>hacked the weak reward model</b> — exploiting its 39% errors instead of
-              using the words. That's <b>reward-model overoptimization</b> (Goodhart's law: "when a measure
-              becomes a target, it ceases to be a good measure"), the central pitfall of RLHF.</span>
-              And it's the last word on why DPO won: <em>DPO has no reward model to hack.</em>
-              <em>Switch 🕹️ PPO vs 🎁 RLOO on the same words — the RL machinery works; a weak reward model is
-              what breaks it.</em></p>
+            <p>First attempt, against the ~61% reward model above. RLOO's machinery worked
+              <em>perfectly</em> — the reward-model score <b>tripled</b> (−0.6 → +2.4) and KL to the reference
+              <b>exploded 9×</b> as the policy chased it. But word-inclusion barely budged (<b>22% → 24%</b>).
+              The policy <b>hacked the weak reward model</b> — exploiting its errors instead of using the words.
+              That's <b>reward-model overoptimization</b> (Goodhart's law: "when a measure becomes a target, it
+              ceases to be a good measure"), the central pitfall of RLHF. The reward model, it turned out,
+              didn't even score a 2-word story above a 1-word one — so "maximize it" didn't mean "use the
+              words."</p>
           </header>
           <div class="code-wrap"><span class="file">src/rloo.py — the leave-one-out advantage (no critic)</span>
           <pre><code data-lang="py">reward = reward_model(samples) - kl_coef * kl_to_ref      # k samples for this prompt
 baseline = (reward.sum() - reward) / (k - 1)             # mean of the OTHER k-1
 advantage = reward - baseline                            # unbiased, low-variance
 loss = -(advantage.detach() * logp_policy).mean()       # plain REINFORCE, no clip</code></pre></div>
+        </div>
+
+        <div class="step" id="s28" data-n="28" data-phase="rlhf">
+          <header>
+            <span class="tag">28 · the fix</span>
+            <h3>Fix the reward, and it climbs</h3>
+            <p>RL is only as good as its reward model — so we built a better one. The weak RM never learned to
+              <em>grade</em> because its pairs were all-or-none (chosen had every word, rejected had none); it
+              never saw "2 words vs 1." The fix is <b>graded pairs</b>, made for free from the corpus: hold the
+              story fixed and vary the <em>request</em> — ask for words the story happens to contain (3/3
+              satisfied) vs words it doesn't (1/3). Now the reward model learns to rank by <em>how many</em>
+              requested words appear — and on real generations it does: 2-word stories now score above 1-word
+              above 0.</p>
+            <p>Same RLOO, same everything — only the reward model changed. And the identical algorithm that
+              <em>hacked</em> now <b>climbs</b>: word-inclusion <b>22% → <b id="rloo2-after">32%</b></b>, with KL
+              <em>bounded</em> (~4, not 9) — it climbed the reward in-distribution, genuinely using more words.
+              The full arc: SFT <b>22%</b> → PPO <b>22%</b> → RLOO/weak-RM <b>24%</b> (hacked) → RLOO/strong-RM
+              <b>32%</b> (climbed) → DPO <b>45%</b>. RL from a reward model <em>works</em> — when the reward
+              model is good. And DPO's quiet advantage endures: no reward model to get right in the first place.
+              <em>🎁 RLOO above is this model — switch it against 🕹️ PPO on the same words.</em></p>
+          </header>
+          <div class="code-wrap"><span class="file">src/rm.py — graded pairs: vary the request, not the response</span>
+          <pre><code data-lang="py"># same story A; make c of the 3 requested words ones that A actually contains
+request(c) = (c words drawn from A) + (3 - c words NOT in A)
+chosen   = request(c_hi)     # more requested words present
+rejected = request(c_lo)     # fewer present  ->  the RM learns to grade by count</code></pre></div>
         </div>
 
       </div>
@@ -964,7 +988,7 @@ loss = -(advantage.detach() * logp_policy).mean()       # plain REINFORCE, no cl
                   "Tell me a story."],
       },
       rloo: {
-        engine: "runq.c · 7.2M params · int8 · RLOO + reward model",
+        engine: "runq.c · 7.2M params · int8 · RLOO + graded reward model",
         model: "models/tinystories_rloo_q80.bin", tok: "models/tinystories_tokenizer.bin",
         size: "8 MB", temp: 0.7, prompt: "Write a story using the words: dragon, cake, brave.",
         placeholder: "type an instruction — e.g. Write a story using the words: …",

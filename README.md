@@ -187,14 +187,25 @@ is the live contrast. Still zero C changes: the critic is discarded, only the po
 ```
 
 Phase 8's PPO lacked the two things real RLHF has: a **learned reward model** and a **low-variance
-estimator**. `rm.py` trains the RM on the *same* preference pairs DPO used (Bradley-Terry loss);
-`rloo.py` runs **RLOO** — no critic, no GAE, no clipping, just a leave-one-out baseline over *k*
-samples per prompt. And the result is the best lesson in the repo: **SFT 22% → PPO 22% → RLOO 24%
-→ DPO 45%.** RLOO's machinery worked perfectly — the reward-model score *tripled* and KL *exploded
-9×* — but word-inclusion barely moved and the outputs degraded into repetition. The policy **hacked
-the weak (~61%) reward model** instead of using the words: **reward-model overoptimization** (Goodhart's
-law), the central pitfall of RLHF. The punchline: **DPO has no reward model to hack** — which is
-exactly why it won. Switch 🕹️ PPO vs 🎁 RLOO live to see the RL machinery work and the weak RM break it.
+estimator**. `rm.py` trains the RM (Bradley-Terry loss); `rloo.py` runs **RLOO** — no critic, no GAE,
+no clipping, just a leave-one-out baseline over *k* samples per prompt.
+
+**First attempt (weak RM):** RLOO's machinery worked perfectly — the reward-model score *tripled*,
+KL *exploded 9×* — but word-inclusion barely moved (24%) and outputs degraded into repetition. The
+policy **hacked the weak (~61%) reward model** instead of using the words: **reward-model
+overoptimization** (Goodhart's law), the central pitfall of RLHF. The reward model didn't even score
+a 2-word story above a 1-word one.
+
+**The fix (graded RM):** the weak RM never learned to *grade* — its pairs were all-or-none. So we
+build **graded pairs** from the corpus (hold the story fixed, vary the request: ask for words the
+story contains vs words it doesn't). Now the RM ranks by *how many* requested words appear — and the
+identical RLOO **climbs**: **22% → 32%**, with KL *bounded* (~4, not 9). Fix the reward, and the same
+algorithm that hacked now genuinely uses the words.
+
+The full arc: **SFT 22% → PPO 22% → RLOO/weak-RM 24% (hacked) → RLOO/graded-RM 32% (climbed) → DPO
+45%.** RL from a reward model works — but only as well as the reward model, and getting it to grade
+is the whole game. DPO's quiet advantage: no reward model to get right at all. Switch 🕹️ PPO vs
+🎁 RLOO live to see it.
 
 ## int8 quantization (`runq.c`)
 

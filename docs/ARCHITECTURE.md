@@ -469,13 +469,57 @@ failure mode of RLHF. The RM was the weak link, and RL faithfully optimized the
 wrong thing. Our KL penalty (`kl_coef=0.05`) was too weak to hold it; that knob
 is the standard defense, along with a *stronger* reward model and early stopping.
 
-### The whole arc, honestly
-- **DPO 45%** — robust, one loss, no RM to hack. *Winner.*
-- **PPO 22%** — naive RL, too high-variance to climb.
-- **RLOO 24%** — RL "done right" (RM + variance reduction); the machinery works,
-  but it overoptimized a weak RM.
+---
 
-The punchline writes itself: **DPO has no reward model to overoptimize.** That is
-exactly why it replaced the RM-plus-RL pipeline for straightforward preference
-alignment — and why this eight-phase detour through PPO and RLOO ends by
-pointing back at the simplest method.
+## Phase 10 — fix the reward, and RL climbs (`rm.py` graded pairs)
+
+Phase 9 blamed the weak reward model. Phase 10 tests that claim by fixing it —
+and the same RLOO that hacked now climbs. Nothing about the algorithm changes;
+only the reward model does.
+
+### Why the weak RM failed: it didn't *grade*
+The tell was in the scores, not the accuracy. Ranking the SFT model's own
+generations by how many requested words they actually contained, the weak RM was
+non-monotone — it scored 1-word stories *higher* than 2-word ones. "Maximize the
+reward" therefore didn't mean "use the words," so RLOO climbed the reward (score
+tripled) while the true metric sat still. Its training pairs were **all-or-none**
+(chosen had every word, rejected none), so it never learned the middle.
+
+### The fix: graded pairs, built from the corpus for free
+Hold the response fixed and vary the **request**. If story A contains
+`{a,b,c,d}`, then asking for `{a,b,c}` is 3/3 satisfied and asking for `{a,y,z}`
+(y,z absent) is 1/3 — *same story, different counts*. A pair (more-present
+request) > (fewer-present request) teaches the RM to rank by **how many**
+requested words appear:
+```python
+request(c) = (c words that ARE in A) + (3 - c words that are NOT)
+chosen, rejected = request(c_hi), request(c_lo)      # c_hi > c_lo
+```
+8,000 of these (seconds to build) later, the RM grades cleanly: on real
+generations, mean score rises monotonically with word count (0 → 1 → 2), spread
+~3 nats. Now maximizing it *means* using the words.
+
+### The result: the hack becomes a climb
+Same RLOO, same hyperparameters, new reward model. Word-inclusion **22% → 32%**,
+and — the diagnostic that matters — **KL stayed bounded (~4, not 9)**: the policy
+climbed the reward *in-distribution* rather than drifting off to exploit it.
+(One footnote: this RL-drifted policy sits close enough to decision boundaries
+that int8 quantization occasionally flips an argmax, so its fp32 and int8 greedy
+paths diverge slightly — the first model in the repo where they aren't identical.
+Both stay coherent.)
+
+### The whole arc, honestly
+| model | word-inclusion | what it teaches |
+|---|---|---|
+| SFT | 22% | the starting point |
+| PPO | 22% | naive RL is too high-variance to climb |
+| RLOO + weak RM | 24% | **reward hacking** — Goodhart, RM tripled, metric flat |
+| RLOO + graded RM | **32%** | fix the reward model and the same RL climbs |
+| **DPO** | **45%** | robust, one loss, **no reward model to get right** |
+
+Two conclusions, both earned the hard way. **RL from a reward model works — but
+only as well as the reward model, and getting the reward model to grade is the
+whole game** (real RLHF pours enormous effort into exactly this). And DPO's quiet
+advantage is that it skips the reward model altogether — which is why a
+ten-phase tour through PPO, RLOO and reward-model surgery ends by pointing back
+at the simplest method on the board.
