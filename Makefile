@@ -74,7 +74,8 @@ web: src/web_api.c src/run.c src/runq.c
 	mkdir -p web/models
 	cp models/shakespeare_q80.bin models/byte_tokenizer.bin web/models/
 	cp models/tinystories_q80.bin models/tinystories_tokenizer.bin web/models/
-	cp models/tinystories_instruct_q80.bin models/tinystories_aligned_q80.bin web/models/
+	cp models/tinystories_instruct_q80.bin models/tinystories_aligned_q80.bin \
+	   models/tinystories_ppo_q80.bin web/models/
 
 clean:
 	rm -f $(BIN) $(QBIN)

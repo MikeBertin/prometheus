@@ -8,11 +8,11 @@ tokenizer and a top-p sampler. Trained from random weights by its own from-scrat
 PyTorch twin, exported to a flat binary of floats, int8-quantized, and running
 **live in your browser** via WebAssembly.
 
-Four self-trained models ship in the demo, switchable live in the same C engine: a
-**DPO-aligned** model and the **instruction-tuned** model it came from (a live A/B on
-preference alignment), their shared **7M-parameter TinyStories base** (trained on ~300 MB
-with a from-scratch 4096-vocab BPE tokenizer), and the original **2.3M byte-level
-Shakespeare** model.
+Five self-trained models ship in the demo, switchable live in the same C engine: two
+alignments of the same instruct model — **DPO** and **PPO** — the **instruction-tuned (SFT)**
+model they came from (a live three-way contrast on preference alignment), their shared
+**7M-parameter TinyStories base** (trained on ~300 MB with a from-scratch 4096-vocab BPE
+tokenizer), and the original **2.3M byte-level Shakespeare** model.
 
 **▶ Live demo + annotated walkthrough: [mikebertin.github.io/prometheus](https://mikebertin.github.io/prometheus/)**
 
@@ -43,6 +43,7 @@ src/prepare_data.py      tokenizes a corpus once into a uint16 memmap for traini
 src/finetune.py          instruction fine-tune (SFT) — chat template + loss masking
 src/gen_prefs.py         builds on-policy preference pairs (RLAIF judge) for DPO
 src/dpo.py               Direct Preference Optimization — policy vs frozen reference
+src/ppo.py               PPO (the RLHF path DPO replaced) — rollouts + critic + GAE + clip
 src/web_api.c            thin emscripten wrapper — the same run.c, compiled to WASM
 web/                     the live demo page + walkthrough (tracked in full,
                          including both trained models, so it deploys as-is)
@@ -155,6 +156,26 @@ one line of loss that rewards only the preferences the reference didn't already 
 reward model, no PPO loop. Word-inclusion climbs measurably; the demo's 🎯 Aligned vs 💬
 Instruct switch is a live A/B on the same words. Watch for the *alignment tax* — push too
 hard and the policy reward-hacks fluency away. Zero C changes; DPO only moves the weights.
+
+### The road not taken: PPO (`ppo.py`)
+
+```sh
+# the classic RLHF algorithm DPO replaced — on-policy RL from the SFT model
+.venv/bin/python src/ppo.py --iters 50    # -> models/tinystories_ppo.bin
+```
+
+DPO is a shortcut around **PPO** (the InstructGPT recipe). `ppo.py` builds the full thing
+so you can compare: same reward, same frozen reference, but now a real reinforcement-learning
+loop — the policy generates **rollouts**, a **value head** (critic) scores them, **GAE** turns
+rewards into advantages, and a **clipped surrogate** objective updates the policy with a KL
+penalty to the reference. Five moving parts regenerated every iteration, versus DPO's one loss
+over a static file. On the same held-out test: **SFT 22% → DPO 45% → PPO ~22%** — and that flat
+PPO number is the honest lesson. Across three configs, PPO was either stuck (stable settings) or
+unstable (aggressive ones: entropy blew up, reward fell); none beat DPO's robust *first-try*
+doubling. PPO isn't incapable — it's the ChatGPT algorithm — it's *finicky*: high-variance policy
+gradient vs DPO's low-variance contrastive loss, at ~20× the wall-clock. That's precisely why DPO
+replaced it for straightforward preference alignment. The demo's 🎯 Aligned (DPO) vs 🕹️ PPO switch
+is the live contrast. Still zero C changes: the critic is discarded, only the policy ships.
 
 ## int8 quantization (`runq.c`)
 

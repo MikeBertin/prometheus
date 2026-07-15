@@ -230,6 +230,7 @@
             <span id="engineline">runq.c · int8</span><span class="tps" id="tps"></span></div>
           <div class="modelsel" id="modelsel">
             <button data-m="aligned" class="on">🎯 Aligned · 7M · DPO</button>
+            <button data-m="ppo">🕹️ PPO · 7M · RLHF</button>
             <button data-m="instruct">💬 Instruct · 7M · SFT</button>
             <button data-m="stories">📖 TinyStories · 7M · BPE</button>
             <button data-m="bard">🎭 Shakespeare · 2.3M · byte</button>
@@ -819,6 +820,49 @@ ref = logp(ref,    chosen) - logp(ref,    rejected)   # did the frozen SFT model
 loss = -logsigmoid(beta * (pol - ref)).mean()         # reward only the NEW preference</code></pre></div>
         </div>
 
+        <div class="phase-row"><span class="label">Alignment II — the road not taken (PPO)</span></div>
+
+        <div class="step" id="s24" data-n="24" data-phase="ppo">
+          <header>
+            <span class="tag">24 · RLHF</span>
+            <h3>The machinery DPO threw away</h3>
+            <p>DPO was invented to <em>replace</em> this. Before it, alignment meant <b>PPO</b> — reinforcement
+              learning, the InstructGPT recipe. Same reward, same frozen reference, but instead of one offline
+              loss over preference pairs, PPO runs a full RL loop: the policy <em>generates</em> responses
+              on-policy, a <span class="term" data-tip="A second head on the network that predicts, at each token, the expected future reward from that state. PPO needs it to compute advantages; DPO needs no such thing.">value
+              head (critic)</span> scores each state, GAE turns rewards into advantages, and a <b>clipped
+              surrogate</b> objective nudges the policy — clipping the probability ratio so no update moves too
+              far (the "proximal" in PPO), with a per-token KL penalty back to the reference.</p>
+            <p>Five moving parts — rollouts, reward, critic, GAE, clipped+KL loss — regenerated every
+              iteration, versus DPO's one loss over a fixed dataset. That extra machinery <em>is</em> the
+              comparison.</p>
+          </header>
+          <div class="code-wrap"><span class="file">src/ppo.py — the clipped surrogate (next to DPO's one line above)</span>
+          <pre><code data-lang="py">ratio = exp(new_logp - old_logp)              # how far the policy moved, per token
+clipped = clamp(ratio, 1-eps, 1+eps) * adv    # don't trust a big move too far
+loss = -min(ratio*adv, clipped).mean() \      # clipped policy gradient
+     + vf_coef*value_loss - ent_coef*entropy  # + train the critic + reward exploration</code></pre></div>
+        </div>
+
+        <div class="step" id="s25" data-n="25" data-phase="ppo">
+          <header>
+            <span class="tag">25 · the verdict</span>
+            <h3>Two roads, same destination</h3>
+            <p>Both start from the SFT model and chase the same reward. On the held-out word-inclusion test:
+              SFT <b>22%</b> → DPO <b id="ppo-dpo">45%</b> → PPO <b id="ppo-after">~22%</b>. That's the honest
+              result: <b>our PPO didn't beat the baseline.</b> Not because PPO <em>can't</em> — it's the
+              algorithm behind ChatGPT — but because it's <em>finicky</em>. Stable settings (higher KL penalty)
+              barely moved; aggressive ones (higher LR, lower KL) destabilized — entropy blew up and reward
+              <em>fell</em>. Across three configs, none cleanly beat DPO's robust <em>first-try</em> doubling.</p>
+            <p>That contrast is the lesson: PPO's high-variance policy gradient vs DPO's low-variance
+              contrastive loss is exactly why DPO became the default for straightforward preference alignment.
+              And the cost gap seals it — PPO needs a critic, GAE, reward shaping, KL/clip tuning, and fresh
+              rollouts <em>every iteration</em> (minutes of generation), for a result DPO reached with one loss
+              over a static file. <em>Switch between 🎯 Aligned (DPO) and 🕹️ PPO on the same words — DPO
+              reliably works them in; our PPO, like SFT, often doesn't.</em></p>
+          </header>
+        </div>
+
       </div>
 
       <footer>
@@ -866,6 +910,20 @@ loss = -logsigmoid(beta * (pol - ref)).mean()         # reward only the NEW pref
                   "Write a story about a robot.",
                   "Write a story about a lost puppy.",
                   "Tell me a story."],
+      },
+      ppo: {
+        engine: "runq.c · 7.2M params · int8 · PPO-aligned (RLHF)",
+        model: "models/tinystories_ppo_q80.bin", tok: "models/tinystories_tokenizer.bin",
+        size: "8 MB", temp: 0.7, prompt: "Write a story using the words: dragon, cake, brave.",
+        placeholder: "type an instruction — e.g. Write a story using the words: …",
+        // same SFT chat template; PPO (like DPO) only moved the weights. This
+        // model was aligned by reinforcement learning instead of DPO — compare
+        // the two on the same words to feel what the algorithm choice buys you.
+        wrap: p => "User: " + p + "\nAssistant:",
+        presets: ["Write a story using the words: dragon, cake, brave.",
+                  "Write a story using the words: moon, boat, secret.",
+                  "Write a story using the words: dog, park, friend.",
+                  "Write a story about a robot."],
       },
       stories: {
         engine: "runq.c · 7.2M params · int8 · BPE-4096",
@@ -1032,7 +1090,7 @@ loss = -logsigmoid(beta * (pol - ref)).mean()         # reward only the NEW pref
     promptEl.addEventListener("keydown", e => { if (e.key === "Enter") generate(); });
 
     // ── sidebar nav, scroll-spy, reveal, progress, copy, highlighter ─────
-    const PHASES = { loop:"The Loop", fwd:"Forward Pass", txt:"Text ⇄ Tokens", train:"Training", quant:"Quantization", scale:"Scale-up", instruct:"Instruction tuning", align:"Alignment (DPO)" };
+    const PHASES = { loop:"The Loop", fwd:"Forward Pass", txt:"Text ⇄ Tokens", train:"Training", quant:"Quantization", scale:"Scale-up", instruct:"Instruction tuning", align:"Alignment (DPO)", ppo:"Alignment II (PPO)" };
     const nav = $("nav");
     let curPhase = null;
     document.querySelectorAll(".step").forEach(step => {

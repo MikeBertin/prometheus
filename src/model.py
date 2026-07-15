@@ -163,7 +163,7 @@ class Transformer(nn.Module):
         if isinstance(module, (nn.Linear, nn.Embedding)):
             nn.init.normal_(module.weight, mean=0.0, std=0.02)
 
-    def forward(self, tokens, targets=None):
+    def forward(self, tokens, targets=None, return_hidden=False):
         x = self.dropout(self.tok_embeddings(tokens))
         for layer in self.layers:
             x = layer(x, self.freqs_cis)
@@ -172,6 +172,10 @@ class Transformer(nn.Module):
         loss = None
         if targets is not None:
             loss = F.cross_entropy(logits.view(-1, logits.size(-1)), targets.view(-1))
+        # return_hidden exposes the final normed hidden state so a PPO value
+        # head (Phase 8) can read it. Training-only; run.c never sees it.
+        if return_hidden:
+            return logits, loss, x
         return logits, loss
 
     @torch.no_grad()

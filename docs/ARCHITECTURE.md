@@ -355,3 +355,67 @@ DPO here optimizes a one-dimensional programmatic reward (word inclusion). Real
 alignment uses *human* preferences over *helpfulness, harmlessness, honesty* —
 many dimensions, no simple rule — and often several rounds. The machinery,
 though, is exactly this: sample, prefer, optimize against a frozen reference.
+
+---
+
+## Phase 8 — the road DPO skipped: PPO (`ppo.py`)
+
+DPO was *invented to replace* PPO. Phase 8 builds the thing it replaced, so you
+can hold them side by side. Same starting point (the SFT model), same frozen
+reference, same programmatic reward — the only variable is the **algorithm**.
+The critic is training-only, so once again **zero `run.c` changes**.
+
+### The contrast in one table
+| | DPO (`dpo.py`) | PPO (`ppo.py`) |
+|---|---|---|
+| signal | offline preference **pairs** | on-policy **rollouts**, regenerated every iter |
+| reward | implicit in the pair | explicit scalar + a **value head** (critic) |
+| advantages | — | **GAE** over per-token rewards |
+| objective | one `logsigmoid` line | **clipped surrogate** + value loss + entropy + KL |
+| character | supervised, stable, fast (~90s) | RL, finicky, slow (rollouts dominate) |
+
+### The four moving parts (`ppo.py`)
+1. **Rollout** — the policy generates responses; we record each token's log-prob
+   under the *old* policy and the critic's value estimate. (Sampled from the
+   policy's true distribution — no temperature — so the PPO ratio starts at 1.)
+2. **Reward shaping** — per-token reward = terminal word-inclusion reward on the
+   last token, minus a per-token KL penalty to the reference everywhere else, so
+   the policy is pulled toward the reward but tethered to the SFT model.
+3. **GAE** — the value head turns that reward stream into per-token advantages
+   (how much better an action was than the critic expected).
+4. **Clipped update** — for K epochs over the rollout, maximize advantage-weighted
+   log-prob, but *clip* the probability ratio to `1 ± ε` so no single step moves
+   the policy too far (the "proximal" guarantee):
+```python
+ratio   = exp(new_logp - old_logp)
+clipped = clamp(ratio, 1-eps, 1+eps) * adv
+loss    = -min(ratio*adv, clipped).mean() + vf_coef*value_loss - ent_coef*entropy
+```
+
+### The three-way result — and why PPO underperformed
+Measured identically on the held-out word-inclusion test:
+**SFT 22% → DPO 45% → PPO ~22%**. The honest outcome is that **our PPO did not
+beat the SFT baseline.** That's not PPO being incapable (it's the InstructGPT/
+ChatGPT algorithm) — it's PPO being *finicky*, which is the whole point:
+
+- `kl_coef=0.1, lr=2e-5` (the shipped run): stable but **flat** — the per-token
+  KL penalty, summed over ~100 tokens, dwarfed the single terminal reward, so the
+  optimizer's equilibrium was "don't move."
+- `kl_coef=0.02, lr=1e-4`: **unstable** — entropy climbed 1.8 → 2.5 and reward
+  *fell*; the policy drifted toward noise.
+- `kl_coef=0.05, lr=3e-5, no entropy bonus`: stable again, but still **flat**.
+
+Three configs, none cleanly beat DPO's robust **first-try** doubling. That IS the
+lesson: PPO's policy gradient is high-variance and tuning-sensitive; DPO's
+contrastive loss is low-variance and robust. Add the *cost asymmetry* — PPO needs
+a critic, GAE, reward shaping, KL/clip tuning, and fresh rollouts every iteration
+(minutes of generation, ~20× the wall-clock) — and you have exactly why DPO
+replaced PPO for straightforward preference alignment, and why RLOO/GRPO later
+dropped the value net too.
+
+### Honest caveats
+The result is config-dependent: more compute, a learned reward model, group-relative
+baselines (RLOO/GRPO), or careful reward normalization could get PPO to climb. We
+stopped at three configs rather than cherry-pick one until it won — the finding
+*is* the finickiness. And our "reward" is a rule, not a learned reward model over
+human preferences: the one piece both toys deliberately skip.
