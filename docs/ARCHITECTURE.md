@@ -418,4 +418,64 @@ The result is config-dependent: more compute, a learned reward model, group-rela
 baselines (RLOO/GRPO), or careful reward normalization could get PPO to climb. We
 stopped at three configs rather than cherry-pick one until it won — the finding
 *is* the finickiness. And our "reward" is a rule, not a learned reward model over
-human preferences: the one piece both toys deliberately skip.
+human preferences — which Phase 9 finally builds.
+
+---
+
+## Phase 9 — RLHF done right, and its favourite failure (`rm.py` + `rloo.py`)
+
+Phase 8 ended with two things missing vs real RLHF: a *learned reward model* and
+a *low-variance estimator*. Phase 9 adds both — and discovers, honestly, the
+most important pitfall in the whole field.
+
+### 1. The reward model (`rm.py`)
+The middle stage of RLHF that DPO folds away. We train it on the **same
+preference pairs DPO used** (Phase 7's `prefs.jsonl`) with the **Bradley-Terry**
+loss — the chosen response should score higher than the rejected one:
+```python
+loss = -logsigmoid(reward_model(prompt+chosen) - reward_model(prompt+rejected)).mean()
+```
+Architecture: the SFT transformer as a backbone + a scalar head on the
+**mean-pooled** hidden states of the whole sequence (a single summary token
+loses whether a specific word appeared 50 tokens back; pooling keeps it, and the
+prompt must be in the pool so the head knows *which* words were asked for).
+
+**Honest limit:** it caps at **~61%** pairwise accuracy — a 7M linear-head probe
+on ~1k pairs is a weak judge. That weakness is the whole story of what follows.
+
+### 2. RLOO (`rloo.py`)
+REINFORCE Leave-One-Out drops PPO's critic, GAE and clipping. Draw *k* samples
+per prompt, score them with the reward model, and let each sample's baseline be
+the mean of the *other* k−1 — an unbiased, low-variance advantage with no value
+net to train:
+```python
+reward   = reward_model(samples) - kl_coef * kl_to_ref
+baseline = (reward.sum() - reward) / (k - 1)      # leave-one-out
+loss     = -(( reward - baseline ).detach() * logp_policy).mean()
+```
+
+### The result: reward hacking, live
+The four-way, all measured identically: **SFT 22% → PPO 22% → RLOO 24% → DPO 45%.**
+RLOO's machinery worked *perfectly* — over 40 iters the reward-model score
+**tripled** (−0.63 → +2.38) and the KL to the reference **exploded** (0 → 9.1) as
+the policy chased it. But **word-inclusion barely moved (22% → 24%)**, and the
+outputs degraded into repetition ("waited and waited", "quiet and quiet").
+
+The policy **hacked the weak reward model** — it found directions that satisfied
+the RM's 39% error surface instead of actually using the words. This is
+**reward-model overoptimization** — Goodhart's law ("when a measure becomes a
+target, it ceases to be a good measure"), the central, extensively-studied
+failure mode of RLHF. The RM was the weak link, and RL faithfully optimized the
+wrong thing. Our KL penalty (`kl_coef=0.05`) was too weak to hold it; that knob
+is the standard defense, along with a *stronger* reward model and early stopping.
+
+### The whole arc, honestly
+- **DPO 45%** — robust, one loss, no RM to hack. *Winner.*
+- **PPO 22%** — naive RL, too high-variance to climb.
+- **RLOO 24%** — RL "done right" (RM + variance reduction); the machinery works,
+  but it overoptimized a weak RM.
+
+The punchline writes itself: **DPO has no reward model to overoptimize.** That is
+exactly why it replaced the RM-plus-RL pipeline for straightforward preference
+alignment — and why this eight-phase detour through PPO and RLOO ends by
+pointing back at the simplest method.

@@ -230,6 +230,7 @@
             <span id="engineline">runq.c · int8</span><span class="tps" id="tps"></span></div>
           <div class="modelsel" id="modelsel">
             <button data-m="aligned" class="on">🎯 Aligned · 7M · DPO</button>
+            <button data-m="rloo">🎁 RLOO · 7M · RM+RL</button>
             <button data-m="ppo">🕹️ PPO · 7M · RLHF</button>
             <button data-m="instruct">💬 Instruct · 7M · SFT</button>
             <button data-m="stories">📖 TinyStories · 7M · BPE</button>
@@ -863,6 +864,57 @@ loss = -min(ratio*adv, clipped).mean() \      # clipped policy gradient
           </header>
         </div>
 
+        <div class="phase-row"><span class="label">RLHF done right — reward model + RLOO</span></div>
+
+        <div class="step" id="s26" data-n="26" data-phase="rlhf">
+          <header>
+            <span class="tag">26 · reward model</span>
+            <h3>The piece both toys skipped</h3>
+            <p>Why did PPO stall? Two missing pieces, and this phase adds them. First, a real <b>reward
+              model</b> — the middle stage of RLHF that DPO folds away and our PPO faked with the raw rule.
+              We train it on the <em>same preference pairs</em> DPO used (Phase 7's file), with the
+              <span class="term" data-tip="loss = -log sigmoid(r(chosen) - r(rejected)). The reward model learns to score the preferred response higher — the exact objective used to train reward models on human preferences.">Bradley-Terry
+              loss</span>: score the chosen response above the rejected one. The result is a <em>dense,
+              smooth</em> reward for any response, a far better gradient signal than the rule's coarse
+              0 / ⅓ / ⅔ / 1.</p>
+            <p>Honest caveat, visible at this scale: our reward model only reaches
+              <b id="rm-acc">~61%</b> pairwise accuracy — a 7M linear-head probe on ~1k pairs is a weak judge.
+              RL is only ever as good as its reward model, and ours is the weak link.</p>
+          </header>
+          <div class="code-wrap"><span class="file">src/rm.py — Bradley-Terry, the reward-model objective</span>
+          <pre><code data-lang="py">r_chosen   = reward_model(prompt + chosen)     # scalar score, mean-pooled hidden
+r_rejected = reward_model(prompt + rejected)
+loss = -logsigmoid(r_chosen - r_rejected).mean()   # chosen should score higher</code></pre></div>
+        </div>
+
+        <div class="step" id="s27" data-n="27" data-phase="rlhf">
+          <header>
+            <span class="tag">27 · RLOO</span>
+            <h3>RL without the machinery</h3>
+            <p>Second missing piece: a low-variance estimator. <b>RLOO</b> (REINFORCE Leave-One-Out) drops
+              PPO's critic, GAE and clipping entirely. For each prompt it draws <em>k</em> samples and scores
+              them with the reward model; the baseline for each sample is simply the
+              <span class="term" data-tip="Advantage = this sample's reward minus the mean reward of the OTHER k-1 samples for the same prompt. An unbiased, low-variance baseline — no value network to train.">mean
+              of the others</span>. That leave-one-out baseline is the whole variance-reduction trick — no
+              value network, no GAE, no clip. One REINFORCE update per rollout, KL-tethered to the reference.</p>
+            <p>The four-way result on the held-out test: SFT <b>22%</b> → PPO <b>~22%</b> →
+              RLOO <b id="rloo-after">~24%</b> → DPO <b>45%</b>. <span id="rloo-verdict">And here's the twist:
+              RLOO's machinery worked <em>perfectly</em> — the reward-model score <b>tripled</b> (−0.6 → +2.4)
+              and KL to the reference <b>exploded 9×</b> as the policy chased it. But the true metric barely
+              budged. The policy <b>hacked the weak reward model</b> — exploiting its 39% errors instead of
+              using the words. That's <b>reward-model overoptimization</b> (Goodhart's law: "when a measure
+              becomes a target, it ceases to be a good measure"), the central pitfall of RLHF.</span>
+              And it's the last word on why DPO won: <em>DPO has no reward model to hack.</em>
+              <em>Switch 🕹️ PPO vs 🎁 RLOO on the same words — the RL machinery works; a weak reward model is
+              what breaks it.</em></p>
+          </header>
+          <div class="code-wrap"><span class="file">src/rloo.py — the leave-one-out advantage (no critic)</span>
+          <pre><code data-lang="py">reward = reward_model(samples) - kl_coef * kl_to_ref      # k samples for this prompt
+baseline = (reward.sum() - reward) / (k - 1)             # mean of the OTHER k-1
+advantage = reward - baseline                            # unbiased, low-variance
+loss = -(advantage.detach() * logp_policy).mean()       # plain REINFORCE, no clip</code></pre></div>
+        </div>
+
       </div>
 
       <footer>
@@ -910,6 +962,19 @@ loss = -min(ratio*adv, clipped).mean() \      # clipped policy gradient
                   "Write a story about a robot.",
                   "Write a story about a lost puppy.",
                   "Tell me a story."],
+      },
+      rloo: {
+        engine: "runq.c · 7.2M params · int8 · RLOO + reward model",
+        model: "models/tinystories_rloo_q80.bin", tok: "models/tinystories_tokenizer.bin",
+        size: "8 MB", temp: 0.7, prompt: "Write a story using the words: dragon, cake, brave.",
+        placeholder: "type an instruction — e.g. Write a story using the words: …",
+        // RL done right: a learned reward model + a low-variance leave-one-out
+        // estimator — the two things naive PPO (🕹️) lacked. Same chat template.
+        wrap: p => "User: " + p + "\nAssistant:",
+        presets: ["Write a story using the words: dragon, cake, brave.",
+                  "Write a story using the words: moon, boat, secret.",
+                  "Write a story using the words: dog, park, friend.",
+                  "Write a story about a robot."],
       },
       ppo: {
         engine: "runq.c · 7.2M params · int8 · PPO-aligned (RLHF)",
@@ -1090,7 +1155,7 @@ loss = -min(ratio*adv, clipped).mean() \      # clipped policy gradient
     promptEl.addEventListener("keydown", e => { if (e.key === "Enter") generate(); });
 
     // ── sidebar nav, scroll-spy, reveal, progress, copy, highlighter ─────
-    const PHASES = { loop:"The Loop", fwd:"Forward Pass", txt:"Text ⇄ Tokens", train:"Training", quant:"Quantization", scale:"Scale-up", instruct:"Instruction tuning", align:"Alignment (DPO)", ppo:"Alignment II (PPO)" };
+    const PHASES = { loop:"The Loop", fwd:"Forward Pass", txt:"Text ⇄ Tokens", train:"Training", quant:"Quantization", scale:"Scale-up", instruct:"Instruction tuning", align:"Alignment (DPO)", ppo:"Alignment II (PPO)", rlhf:"RLHF done right (RM + RLOO)" };
     const nav = $("nav");
     let curPhase = null;
     document.querySelectorAll(".step").forEach(step => {

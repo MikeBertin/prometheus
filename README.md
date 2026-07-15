@@ -8,11 +8,11 @@ tokenizer and a top-p sampler. Trained from random weights by its own from-scrat
 PyTorch twin, exported to a flat binary of floats, int8-quantized, and running
 **live in your browser** via WebAssembly.
 
-Five self-trained models ship in the demo, switchable live in the same C engine: two
-alignments of the same instruct model — **DPO** and **PPO** — the **instruction-tuned (SFT)**
-model they came from (a live three-way contrast on preference alignment), their shared
-**7M-parameter TinyStories base** (trained on ~300 MB with a from-scratch 4096-vocab BPE
-tokenizer), and the original **2.3M byte-level Shakespeare** model.
+Six self-trained models ship in the demo, switchable live in the same C engine: three
+alignments of the same instruct model — **DPO**, **PPO**, and **RLOO** (a reward model + RL) —
+the **instruction-tuned (SFT)** model they came from (a live four-way contrast on preference
+alignment), their shared **7M-parameter TinyStories base** (trained on ~300 MB with a
+from-scratch 4096-vocab BPE tokenizer), and the original **2.3M byte-level Shakespeare** model.
 
 **▶ Live demo + annotated walkthrough: [mikebertin.github.io/prometheus](https://mikebertin.github.io/prometheus/)**
 
@@ -44,6 +44,8 @@ src/finetune.py          instruction fine-tune (SFT) — chat template + loss ma
 src/gen_prefs.py         builds on-policy preference pairs (RLAIF judge) for DPO
 src/dpo.py               Direct Preference Optimization — policy vs frozen reference
 src/ppo.py               PPO (the RLHF path DPO replaced) — rollouts + critic + GAE + clip
+src/rm.py                reward model — Bradley-Terry on the preference pairs
+src/rloo.py              RLOO (REINFORCE Leave-One-Out) against the reward model
 src/web_api.c            thin emscripten wrapper — the same run.c, compiled to WASM
 web/                     the live demo page + walkthrough (tracked in full,
                          including both trained models, so it deploys as-is)
@@ -176,6 +178,23 @@ doubling. PPO isn't incapable — it's the ChatGPT algorithm — it's *finicky*:
 gradient vs DPO's low-variance contrastive loss, at ~20× the wall-clock. That's precisely why DPO
 replaced it for straightforward preference alignment. The demo's 🎯 Aligned (DPO) vs 🕹️ PPO switch
 is the live contrast. Still zero C changes: the critic is discarded, only the policy ships.
+
+### RLHF done right — reward model + RLOO (`rm.py` + `rloo.py`)
+
+```sh
+.venv/bin/python src/rm.py --epochs 8       # train a reward model on the pref pairs (Bradley-Terry)
+.venv/bin/python src/rloo.py --iters 40     # REINFORCE Leave-One-Out against it -> models/tinystories_rloo.bin
+```
+
+Phase 8's PPO lacked the two things real RLHF has: a **learned reward model** and a **low-variance
+estimator**. `rm.py` trains the RM on the *same* preference pairs DPO used (Bradley-Terry loss);
+`rloo.py` runs **RLOO** — no critic, no GAE, no clipping, just a leave-one-out baseline over *k*
+samples per prompt. And the result is the best lesson in the repo: **SFT 22% → PPO 22% → RLOO 24%
+→ DPO 45%.** RLOO's machinery worked perfectly — the reward-model score *tripled* and KL *exploded
+9×* — but word-inclusion barely moved and the outputs degraded into repetition. The policy **hacked
+the weak (~61%) reward model** instead of using the words: **reward-model overoptimization** (Goodhart's
+law), the central pitfall of RLHF. The punchline: **DPO has no reward model to hack** — which is
+exactly why it won. Switch 🕹️ PPO vs 🎁 RLOO live to see the RL machinery work and the weak RM break it.
 
 ## int8 quantization (`runq.c`)
 
