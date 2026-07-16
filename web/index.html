@@ -939,6 +939,43 @@ chosen   = request(c_hi)     # more requested words present
 rejected = request(c_lo)     # fewer present  ->  the RM learns to grade by count</code></pre></div>
         </div>
 
+        <div class="phase-row"><span class="label">Measuring It Honestly</span></div>
+
+        <div class="step" id="s29" data-n="29" data-phase="measure">
+          <header>
+            <span class="tag">29 · the floor</span>
+            <h3>Every benchmark has a floor</h3>
+            <p>"45%" invites an obvious complaint: fewer than half the requested words show up — that's not a
+              good assistant. Fair. But before you accept <em>or</em> dismiss a number, ask what it scores when
+              the model <em>ignores the instruction entirely</em>. TinyStories has a small, repetitive
+              vocabulary, so a story that never read the request still contains <b>~11%</b> of the requested
+              words by pure coincidence. That's the floor, and it takes one line to measure: score each story
+              against a <em>different</em> prompt's words.</p>
+            <p>Subtract it and the picture inverts. SFT scores 19.6% against a 10.4% floor — only
+              <b>+9 points</b> of real instruction-following; a third of its headline was luck. DPO scores 43.3%
+              against 11.7% — <b>+32 points</b>. So the honest comparison was never 22% → 45% (a 2× bump); it's
+              <b>9 → 32, about 3.4×</b>. The raw numbers were <em>understating</em> alignment.</p>
+            <p>The metric is also harsher than it sounds. The requested words are picked to be
+              <em>distinctive</em>, which means <b>78%</b> of them are rare. Split it out: on common words DPO
+              hits <b>60%</b>; on rare words <b>39%</b> — up from SFT's 13%, nearly 3×. The headline is dominated
+              by the hardest version of the task, and a 7M model with a 4096-token vocabulary may not reliably
+              <em>spell</em> a rare word at all. Some of that miss rate is a
+              <span class="term" data-tip="A rare word tokenizes into several BPE pieces the model seldom emits in sequence. No amount of alignment fixes that — it's a capacity and vocabulary limit.">capacity
+              ceiling</span>, not an alignment failure.</p>
+            <p>And one caveat aimed at ourselves: at n=240 the standard error is <b>±3 points</b>. DPO's 45% vs
+              RLOO's 32% is a real gap (~4 s.e.), but "SFT 22% vs PPO 22%" is just noise agreeing with noise —
+              read no precision into it. <em>The lesson outlives the number: know your floor, report the lift,
+              and know which part of the task your metric is actually measuring.</em></p>
+          </header>
+          <div class="code-wrap"><span class="file">the control — same stories, shuffled requests</span>
+          <pre><code data-lang="py"># real:  does story i contain the words asked of story i?
+hit    = sum(w in gens[i] for w in reqs[i])
+# floor: does story i contain the words asked of some OTHER story?
+chance = sum(w in gens[i] for w in reqs[(i + 7) % n])   # ~11% — pure coincidence
+
+lift = hit/tot - chance/tot      # <- the only number that means anything</code></pre></div>
+        </div>
+
       </div>
 
       <footer>
@@ -1179,7 +1216,7 @@ rejected = request(c_lo)     # fewer present  ->  the RM learns to grade by coun
     promptEl.addEventListener("keydown", e => { if (e.key === "Enter") generate(); });
 
     // ── sidebar nav, scroll-spy, reveal, progress, copy, highlighter ─────
-    const PHASES = { loop:"The Loop", fwd:"Forward Pass", txt:"Text ⇄ Tokens", train:"Training", quant:"Quantization", scale:"Scale-up", instruct:"Instruction tuning", align:"Alignment (DPO)", ppo:"Alignment II (PPO)", rlhf:"RLHF done right (RM + RLOO)" };
+    const PHASES = { loop:"The Loop", fwd:"Forward Pass", txt:"Text ⇄ Tokens", train:"Training", quant:"Quantization", scale:"Scale-up", instruct:"Instruction tuning", align:"Alignment (DPO)", ppo:"Alignment II (PPO)", rlhf:"RLHF done right (RM + RLOO)", measure:"Measuring It Honestly" };
     const nav = $("nav");
     let curPhase = null;
     document.querySelectorAll(".step").forEach(step => {

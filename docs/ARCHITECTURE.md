@@ -523,3 +523,46 @@ whole game** (real RLHF pours enormous effort into exactly this). And DPO's quie
 advantage is that it skips the reward model altogether — which is why a
 ten-phase tour through PPO, RLOO and reward-model surgery ends by pointing back
 at the simplest method on the board.
+
+---
+
+## Measuring it honestly (`eval_lift.py`)
+
+"45%" invites the obvious complaint — fewer than half the requested words appear,
+which is not a good assistant. Fair. But a score is meaningless without its
+**floor**: what does the metric read when the model ignores the instruction
+entirely? One line of control answers it — score each generated story against a
+*different* prompt's requested words:
+
+```python
+hit    = sum(w in gens[i] for w in reqs[i])              # real
+chance = sum(w in gens[i] for w in reqs[(i + 7) % n])    # floor: ~11%
+lift   = hit/tot - chance/tot                            # the real signal
+```
+
+TinyStories' vocabulary is small and repetitive, so the floor is **~11%** — a
+story that never read the request still contains that many requested words by
+coincidence. Subtracting it inverts the reading:
+
+| | raw | floor | **lift** | common words | rare words |
+|---|---|---|---|---|---|
+| SFT | 19.6% | 10.4% | **+9.2** | 42.3% | 13.3% |
+| DPO | 43.3% | 11.7% | **+31.7** | 59.6% | 38.8% |
+
+So the honest comparison was never 22% → 45% (a 2× bump) — it's **9 → 32 points
+of real instruction-following, ~3.4×**. A third of SFT's headline was luck; the
+raw numbers were *understating* alignment.
+
+**The benchmark is also harder than it sounds.** `content_words()` picks
+*distinctive* words, so **78%** of what we request is rare. The headline is
+dominated by the hardest version of the task — and a 7M model with a 4096-token
+vocabulary may not reliably *spell* a rare word (it tokenizes into pieces the
+model seldom emits in sequence). Part of that miss rate is a **capacity ceiling,
+not an alignment failure**.
+
+**And a caveat aimed at ourselves:** at n=240 the binomial standard error is
+**±3 points**. DPO's 45% vs RLOO's 32% is a real gap (~4 s.e.); "SFT 22% vs PPO
+22%" is noise agreeing with noise, and no precision should be read into it.
+
+The lesson outlives the number: **know your floor, report the lift, and know
+which part of the task your metric is actually measuring.**

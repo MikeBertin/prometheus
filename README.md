@@ -43,6 +43,7 @@ src/prepare_data.py      tokenizes a corpus once into a uint16 memmap for traini
 src/finetune.py          instruction fine-tune (SFT) — chat template + loss masking
 src/gen_prefs.py         builds on-policy preference pairs (RLAIF judge) for DPO
 src/dpo.py               Direct Preference Optimization — policy vs frozen reference
+src/eval_lift.py         the honest metric — measures the chance floor, reports the lift
 src/ppo.py               PPO (the RLHF path DPO replaced) — rollouts + critic + GAE + clip
 src/rm.py                reward model — Bradley-Terry on the preference pairs
 src/rloo.py              RLOO (REINFORCE Leave-One-Out) against the reward model
@@ -206,6 +207,18 @@ The full arc: **SFT 22% → PPO 22% → RLOO/weak-RM 24% (hacked) → RLOO/grade
 45%.** RL from a reward model works — but only as well as the reward model, and getting it to grade
 is the whole game. DPO's quiet advantage: no reward model to get right at all. Switch 🕹️ PPO vs
 🎁 RLOO live to see it.
+
+### Measuring it honestly (`eval_lift.py`)
+
+45% sounds unimpressive until you ask what the metric reads when the model **ignores the instruction
+entirely**. TinyStories' vocabulary is small and repetitive, so that floor is **~11%** — measured by
+scoring each story against a *different* prompt's words. Subtract it and the reading inverts: SFT is
+19.6% raw over a 10.4% floor (**+9 points** of real instruction-following — a third of its headline
+was luck); DPO is 43.3% over 11.7% (**+32**). The honest comparison isn't 22%→45%, it's **9 → 32,
+about 3.4×** — the raw numbers *understated* alignment. The benchmark is also harsher than it sounds:
+`content_words()` picks *distinctive* words, so **78% of what we ask for is rare** (DPO: 60% on common
+words, 39% on rare). And at n=240 the standard error is ±3 points, so DPO-vs-RLOO is a real gap while
+"SFT 22% vs PPO 22%" is just noise. **Know your floor, report the lift.**
 
 ## int8 quantization (`runq.c`)
 
