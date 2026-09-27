@@ -1,8 +1,8 @@
 /* ============================================================================
- * PROMETHEUS — runq.c
+ * PROMETHEUS: runq.c
  * The same transformer as run.c, with int8-quantized weights (Q8_0).
  *
- * Why quantize? matmul — 95% of inference — is MEMORY-BANDWIDTH bound: the
+ * Why quantize? matmul (95% of inference) is MEMORY-BANDWIDTH bound: the
  * CPU spends its time streaming weight bytes, not multiplying. Store each
  * weight in 1 byte instead of 4 and you move 4x less memory (and the file
  * shrinks 4x). The catch: int8 can only represent 256 distinct values, so
@@ -28,7 +28,7 @@
  * each quantized tensor as [int8 q[]][fp32 s[]].
  *
  * Everything not about quantization (tokenizer, sampler, RoPE, attention,
- * generation loop) is IDENTICAL to run.c — see that file for the annotated
+ * generation loop) is IDENTICAL to run.c; see that file for the annotated
  * walkthrough of the transformer itself.
  * ========================================================================== */
 
@@ -55,7 +55,7 @@ typedef struct {
     float* s;  // one fp32 scale per group of GS values
 } QuantizedTensor;
 
-/* w ~= q * s — the lossy inverse of quantize(). */
+/* w ~= q * s: the lossy inverse of quantize(). */
 void dequantize(QuantizedTensor* qx, float* x, int n) {
     for (int i = 0; i < n; i++) x[i] = qx->q[i] * qx->s[i / GS];
 }
@@ -112,7 +112,7 @@ typedef struct {
     float* rms_ffn_weight;        // (n_layers, dim)
     float* rms_final_weight;      // (dim,)
     // everything that feeds a matmul is int8
-    QuantizedTensor* q_tokens;    // (vocab_size, dim) — quantized embeddings
+    QuantizedTensor* q_tokens;    // (vocab_size, dim), quantized embeddings
     float* token_embedding_table; // same, dequantized once at load for lookup
     QuantizedTensor* wq;          // (n_layers, dim, dim)
     QuantizedTensor* wk;          // (n_layers, dim, kv_dim)
@@ -121,7 +121,7 @@ typedef struct {
     QuantizedTensor* w1;          // (n_layers, hidden_dim, dim)
     QuantizedTensor* w2;          // (n_layers, dim, hidden_dim)
     QuantizedTensor* w3;          // (n_layers, hidden_dim, dim)
-    QuantizedTensor* wcls;        // (vocab_size, dim) — may alias q_tokens
+    QuantizedTensor* wcls;        // (vocab_size, dim), may alias q_tokens
 } TransformerWeights;
 
 typedef struct {
@@ -135,7 +135,7 @@ typedef struct {
     float* q;            // (dim,) query
     float* att;          // (n_heads, seq_len)
     float* logits;       // (vocab_size,)
-    float* key_cache;    // (n_layers, seq_len, kv_dim) — fp32, deliberately
+    float* key_cache;    // (n_layers, seq_len, kv_dim): fp32, deliberately
     float* value_cache;  // (n_layers, seq_len, kv_dim)
 } RunState;
 
@@ -230,7 +230,7 @@ void read_checkpoint(char* path, Config* config, TransformerWeights* weights,
 
     uint32_t magic; int version;
     if (fread(&magic, sizeof(uint32_t), 1, file) != 1) { exit(EXIT_FAILURE); }
-    if (magic != 0x616b3432) { fprintf(stderr, "bad magic — not an ak42 v2 checkpoint (use export.py --q80)\n"); exit(EXIT_FAILURE); }
+    if (magic != 0x616b3432) { fprintf(stderr, "bad magic: not an ak42 v2 checkpoint (use export.py --q80)\n"); exit(EXIT_FAILURE); }
     if (fread(&version, sizeof(int), 1, file) != 1) { exit(EXIT_FAILURE); }
     if (version != 2) { fprintf(stderr, "unsupported version %d (want 2)\n", version); exit(EXIT_FAILURE); }
     if (fread(config, sizeof(Config), 1, file) != 1) { exit(EXIT_FAILURE); }
@@ -240,9 +240,9 @@ void read_checkpoint(char* path, Config* config, TransformerWeights* weights,
     if (fread(&group_size, sizeof(int), 1, file) != 1) { exit(EXIT_FAILURE); }
     GS = group_size;
     // groups must align with matrix rows, or matmul's scale indexing is off
-    // by half a group on every odd row (see export.py) — refuse loudly
+    // by half a group on every odd row (see export.py), so refuse loudly
     if (config->dim % GS != 0 || config->hidden_dim % GS != 0) {
-        fprintf(stderr, "group size %d does not divide dim %d / hidden_dim %d — re-export\n",
+        fprintf(stderr, "group size %d does not divide dim %d / hidden_dim %d; re-export\n",
                 GS, config->dim, config->hidden_dim);
         exit(EXIT_FAILURE);
     }
@@ -298,7 +298,7 @@ void softmax(float* x, int size) {
 }
 
 /* ----------------------------------------------------------------------------
- * 3. THE FORWARD PASS — same shape as run.c, but every matmul is preceded by
+ * 3. THE FORWARD PASS: same shape as run.c, but every matmul is preceded by
  *    an activation quantize() and runs in int8.
  * -------------------------------------------------------------------------- */
 float* forward(Transformer* transformer, int token, int pos) {
@@ -327,7 +327,7 @@ float* forward(Transformer* transformer, int token, int pos) {
         matmul(k,    &s->xq, w->wk + l, dim, kv_dim);
         matmul(v,    &s->xq, w->wv + l, dim, kv_dim);
 
-        // RoPE — identical to run.c (fp32; rotation is not a matmul)
+        // RoPE: identical to run.c (fp32; rotation is not a matmul)
         for (int i = 0; i < dim; i += 2) {
             int head_dim = i % head_size;
             float freq = 1.0f / powf(10000.0f, head_dim / (float)head_size);
@@ -342,7 +342,7 @@ float* forward(Transformer* transformer, int token, int pos) {
             }
         }
 
-        // attention — identical to run.c; scores/values stay fp32 because the
+        // attention: identical to run.c; scores/values stay fp32 because the
         // KV cache is fp32 (quantizing IT is the next frontier: "KV cache
         // quantization" is exactly this trade at LLM scale)
         for (int h = 0; h < p->n_heads; h++) {
@@ -391,7 +391,7 @@ float* forward(Transformer* transformer, int token, int pos) {
 }
 
 /* ----------------------------------------------------------------------------
- * 4–6. TOKENIZER, SAMPLER, GENERATION — byte-identical to run.c.
+ * 4–6. TOKENIZER, SAMPLER, GENERATION: byte-identical to run.c.
  * See run.c for the annotated versions; kept inline so runq is standalone.
  * -------------------------------------------------------------------------- */
 

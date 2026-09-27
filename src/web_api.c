@@ -1,8 +1,8 @@
 /* ============================================================================
- * PROMETHEUS — web_api.c
+ * PROMETHEUS: web_api.c
  * A thin emscripten wrapper around run.c for the browser demo.
  *
- * The inference engine is the REAL run.c — included below, unmodified, with
+ * The inference engine is the REAL run.c, included below, unmodified, with
  * only its CLI main() compiled out. This file adds a small stateful API the
  * page's JS drives one token at a time:
  *
@@ -17,7 +17,7 @@
 
 #include <emscripten.h>
 
-/* Compile against either engine — they expose identical internals.
+/* Compile against either engine; they expose identical internals.
  * -DPROMETHEUS_Q selects the int8 runq.c (what the live site ships:
  * 2.4 MB of weights instead of 9.1, and ~2x the tok/s). */
 #define PROMETHEUS_LIB
@@ -53,7 +53,7 @@ int prom_init(const char *model_path, const char *tokenizer_path) {
 /* Swap to a different checkpoint + tokenizer at runtime (the model switcher).
  * Frees whatever is currently resident, then loads the new pair. Lets one WASM
  * build serve both the byte-level Shakespeare model and the BPE TinyStories
- * one — the config (vocab_size, seq_len, dims) is read fresh from each file. */
+ * one. The config (vocab_size, seq_len, dims) is read fresh from each file. */
 EMSCRIPTEN_KEEPALIVE
 int prom_reload(const char *model_path, const char *tokenizer_path) {
     if (loaded) { free_transformer(&T); free_tokenizer(&TOK); }

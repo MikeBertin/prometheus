@@ -1,10 +1,10 @@
 """
-PROMETHEUS — bpe.py
+PROMETHEUS: bpe.py
 
 A byte-level BPE tokenizer, trained from scratch, exported into the SAME
 tokenizer.bin format run.c already reads. No C changes are needed: run.c's
 encode() is a greedy "merge the highest-scored adjacent pair" loop, which is
-exactly BPE decoding — so if we write our merges with scores that encode
+exactly BPE decoding. So if we write our merges with scores that encode
 priority, run.c reproduces our tokenization for free.
 
 Why this matters vs the Phase-2 byte tokenizer: "Once upon a time" was 16
@@ -23,7 +23,7 @@ Design, and how it stays consistent with run.c:
     highest-priority BPE rule == standard BPE.
   * Pre-tokenization attaches a leading space to each word (" the" is a unit),
     so no learned token ever spans a word boundary. That means run.c's GLOBAL
-    greedy merge and our PER-WORD greedy merge partition text identically —
+    greedy merge and our PER-WORD greedy merge partition text identically,
     letting us cache per unique word and stay exactly equivalent.
 """
 import argparse
@@ -110,7 +110,7 @@ class Tokenizer:
 
     def _encode_word(self, word: str):
         """Greedily merge the highest-priority (lowest-rank) pair until none
-        apply — identical in effect to run.c's max-score merge loop."""
+        apply (identical in effect to run.c's max-score merge loop)."""
         ids = [b + N_SPECIAL for b in word.encode()]
         while len(ids) >= 2:
             best_rank, best_i = None, None

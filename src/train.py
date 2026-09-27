@@ -1,5 +1,5 @@
 """
-PROMETHEUS — train.py
+PROMETHEUS: train.py
 
 Trains the Llama-style transformer and exports straight to run.c's format.
 Two data modes:

@@ -1,7 +1,7 @@
 """
-PROMETHEUS — dpo.py  (Phase 7, step 2 of 2)
+PROMETHEUS: dpo.py  (Phase 7, step 2 of 2)
 
-Direct Preference Optimization — the alignment stage, after SFT.
+Direct Preference Optimization: the alignment stage, after SFT.
 
 Classic RLHF trains a separate reward model on the preference pairs, then uses
 RL (PPO) to push the policy toward high reward. DPO (Rafailov et al., 2023)
@@ -10,8 +10,8 @@ simple classification-style loss, and the "reward" is implicit in the policy's
 own log-probs relative to a frozen reference.
 
 Two copies of the SFT model:
-  - policy    (trainable)  — what we're aligning
-  - reference (frozen)     — the SFT model, an anchor so the policy can't drift
+  - policy    (trainable):   what we're aligning
+  - reference (frozen):      the SFT model, an anchor so the policy can't drift
                              into gibberish just to win the preference
 
 For each pair (prompt, chosen, rejected), with sequence log-probs summed over

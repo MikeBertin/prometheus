@@ -1,4 +1,4 @@
-# PROMETHEUS — Architecture Notes
+# PROMETHEUS: Architecture Notes
 
 A map from the transformer math to the lines in [`src/run.c`](../src/run.c).
 This is a **decoder-only transformer**, Llama-2 flavor, inference only.
@@ -7,7 +7,7 @@ This is a **decoder-only transformer**, Llama-2 flavor, inference only.
 
 A language model is a function: given a sequence of tokens, output a
 probability distribution over what the next token should be. Generation is
-just calling that function in a loop, sampling one token, appending it, and
+just calling that function in a loop, sampling one token, appending it and
 calling again.
 
 ```
@@ -25,8 +25,8 @@ token id ──► [embedding] ──► residual stream x (a vector of size `di
 ```
 
 The **residual stream** `x` is the throughline: every sub-layer reads it,
-computes a correction, and adds that correction back. Information is never
-overwritten, only edited — that's why deep transformers train stably.
+computes a correction and adds that correction back. Information is never
+overwritten, only edited. That's why deep transformers train stably.
 
 ## The pieces, and where they live
 
@@ -35,7 +35,7 @@ overwritten, only edited — that's why deep transformers train stably.
 | **Embedding** | token id → learned vector | `forward()`, `memcpy` from `token_embedding_table` |
 | **RMSNorm** | rescale a vector to unit RMS, then per-dim gain. Stabilizes scale before each sub-layer. No mean-subtraction, no bias (cheaper than LayerNorm). | `rmsnorm()` |
 | **QKV projection** | three matmuls turn `x` into query, key, value vectors | `matmul` of `wq/wk/wv` |
-| **RoPE** | rotary position encoding — *rotates* each (even,odd) dim pair by an angle ∝ position. Attention dot-products then depend only on *relative* distance between tokens. | the `for (i ... i+=2)` loop |
+| **RoPE** | rotary position encoding: it *rotates* each (even,odd) dim pair by an angle ∝ position. Attention dot-products then depend only on *relative* distance between tokens. | the `for (i ... i+=2)` loop |
 | **Attention** | each head: score every past token by query·key, softmax, take weighted sum of values. This is the only place tokens talk to each other. | the `for (h ...)` head loop |
 | **KV cache** | past keys/values are stored, so step *t* is O(t) not O(t²). | `key_cache` / `value_cache` |
 | **GQA** | query heads can share key/value heads (`kv_mul`). Saves cache memory. (stories15M uses 1:1, so kv_mul=1.) | `h / kv_mul` indexing |
@@ -48,7 +48,7 @@ overwritten, only edited — that's why deep transformers train stably.
 Everything except the `for (h ...)` head loop operates on each token
 independently. Attention is the *only* operation that moves information
 *between* token positions. The query asks "what am I looking for?", each past
-key answers "here's what I am", and the softmax-weighted sum of values pulls in
+key answers "here's what I am" and the softmax-weighted sum of values pulls in
 the relevant context. "Attention Is All You Need" is literally true: strip
 attention and you have a fancy per-token MLP with no memory.
 
@@ -68,19 +68,19 @@ head_size=48  vocab_size=32000  seq_len=256   (~15M parameters)
 
 ## What's deliberately NOT here
 
-- **No backward pass / autograd.** This is inference. Gradients, the loss, and
+- **No backward pass / autograd.** This is inference. Gradients, the loss and
   the optimizer live in the (future) `train.py`.
-- **No batching.** One sequence at a time — clearest for learning.
+- **No batching.** One sequence at a time, which is clearest for learning.
 - **No quantization.** Pure float32. A `runq.c` int8 variant is a good later exercise.
 
-## Phase 2 — training our own weights
+## Phase 2: training our own weights
 
 The pipeline: [`train.py`](../src/train.py) trains
 [`model.py`](../src/model.py) (the PyTorch twin of `run.c`) →
 [`export.py`](../src/export.py) writes the binary layout `read_checkpoint()`
 expects → the same `run.c` runs *our* weights.
 
-**The format contract** is the `memory_map_weights()` ordering — header of 7
+**The format contract** is the `memory_map_weights()` ordering: a header of 7
 ints, then each tensor type concatenated across layers, in order. `nn.Linear`
 stores weights as (out, in) row-major, which is exactly the layout `matmul()`
 indexes, so tensors dump with no transpose.
@@ -98,8 +98,8 @@ the export produces fluent garbage):
 
 **The byte-level tokenizer** ([`tokenizer_export.py`](../src/tokenizer_export.py)):
 vocab = `<unk>`, `<s>`, `</s>` + one token per byte (259 total). run.c needed
-zero changes — printable bytes are their own token strings, the rest use the
-`<0xNN>` spelling `decode()` already parses, and the BPE merge loop simply
+zero changes: printable bytes are their own token strings, the rest use the
+`<0xNN>` spelling `decode()` already parses and the BPE merge loop simply
 finds nothing to merge. Trade: no tokenizer training at all, but 1 byte = 1
 token, so `seq_len=256` sees ~256 characters of context.
 
@@ -107,13 +107,13 @@ token, so `seq_len=256` sees ~256 characters of context.
 hidden=512, seq_len=256, vocab=259 → **2.26M params**, trained on
 tiny-Shakespeare (~1.1M tokens) with AdamW + cosine LR on Apple MPS.
 BOS is inserted at every blank-line boundary so the model learns it as
-"new speaker block" — which is why unprompted generation (run.c starts from
+"new speaker block", which is why unprompted generation (run.c starts from
 BOS) opens like a play instead of mid-sentence.
 
-## Phase 3 — the web demo (`make web`)
+## Phase 3: the web demo (`make web`)
 
 The same `run.c`, compiled to WebAssembly, generating live in the browser at
-[web/index.html](../web/index.html) — hermes/kernel-style page: live demo in
+[web/index.html](../web/index.html), a hermes/kernel-style page: live demo in
 the hero + 15-step annotated walkthrough (including the real loss curves).
 
 - `run.c`'s CLI `main()` is guarded by `#ifndef PROMETHEUS_LIB`;
@@ -125,15 +125,15 @@ the hero + 15-step annotated walkthrough (including the real loss curves).
 - Build: `emcc -O3 -msimd128 -ffast-math … -sMODULARIZE -sEXPORT_NAME=Prometheus
   -sEXPORTED_RUNTIME_METHODS=cwrap,FS -sALLOW_MEMORY_GROWTH --no-entry`.
 - The page benchmarks the raw engine at load (a silent flat-out generation)
-  and *paces* the visible typewriter at ~100 tok/s wall-clock — pacing by
+  and *paces* the visible typewriter at ~100 tok/s wall-clock. Pacing by
   elapsed time means throttled rAF frames burst-catch-up instead of crawling.
 - Serve locally: `python3 -m http.server --directory web` (or the
   `prometheus-web` entry in `.claude/launch.json`).
 
-## Phase 4 — int8 quantization (`runq.c`)
+## Phase 4: int8 quantization (`runq.c`)
 
 [`src/runq.c`](../src/runq.c) is run.c's quantized sibling: same transformer,
-but every matmul weight stored as **Q8_0** — int8 values + one fp32 scale per
+but every matmul weight stored as **Q8_0**: int8 values + one fp32 scale per
 group of GS consecutive values (`scale = max|w|/127`, symmetric). Activations
 are quantized on the fly before each matmul; the inner dot product accumulates
 in int32 and applies the two scales once per group. Norms, activations
@@ -146,17 +146,17 @@ Measured (M-series, `-n 256`): Shakespeare 9.1→2.4 MB and ~6.7k→~15.8k tok/s
 Export: `export.py --q80` writes the v2 "ak42" format (256-byte header with
 `shared_classifier` + `group_size`, fp32 norms first, then each tensor as
 `[int8 q][fp32 scales]`). It accepts either `ckpt.pt` **or a legacy fp32
-.bin** — so stories15M can be quantized without its original checkpoint.
+.bin**, so stories15M can be quantized without its original checkpoint.
 
 The web demo now ships this engine: `make web` compiles `web_api.c` with
-`-DPROMETHEUS_Q` (which includes runq.c instead of run.c — identical
+`-DPROMETHEUS_Q` (which includes runq.c instead of run.c; identical
 internals) and the page fetches `shakespeare_q80.bin` (2.4 MB vs 9.1).
 Walkthrough steps 16–17 cover Q8_0 and the row-alignment war story.
 
 **The gotcha that cost an hour**: groups must align with matrix *rows*.
 runq.c's matmul indexes a weight's scales as `(row*n + j)/GS`, valid only if
-GS divides every row length (dim *and* hidden_dim). stories15M has dim=288 —
-not divisible by 64 — so at GS=64 every odd row read its neighbour's scales
+GS divides every row length (dim *and* hidden_dim). stories15M has dim=288
+(not divisible by 64), so at GS=64 every odd row read its neighbour's scales
 and the model emitted intermittent junk tokens ("named**opts**a") while
 mostly-fluent text survived. Shakespeare (dim=192) masked the bug entirely.
 The exporter now auto-shrinks GS (64→32 for stories15M) and runq.c refuses
@@ -166,7 +166,7 @@ isolated corruption to specific vocab rows → scale misalignment.
 
 ---
 
-## Phase 5 — scaling up: real BPE + TinyStories
+## Phase 5: scaling up: real BPE + TinyStories
 
 Phases 2–4 used a **byte-level** tokenizer (vocab 259): every character is its
 own token, so "Once upon a time" is 16 tokens and the model spends most of its
@@ -179,20 +179,20 @@ corpus.
 Byte-Pair Encoding starts from the 256 raw bytes and repeatedly fuses the most
 frequent adjacent pair into a new token, until the vocabulary reaches a target
 size (4096). The first merges it learns on TinyStories are exactly what you'd
-guess: `he`, ` t`, ` a`, `in`, `the` — the statistical bones of English.
+guess: `he`, ` t`, ` a`, `in`, `the`: the statistical bones of English.
 
 **The key insight: run.c needed zero changes.** Its `encode()` was already a
-greedy "merge the highest-scored adjacent pair" loop — which *is* BPE decoding.
+greedy "merge the highest-scored adjacent pair" loop, which *is* BPE decoding.
 So we only had to (a) train the merges and (b) write them into the same
 `tokenizer.bin` format with `score = -rank`, so the earliest-learned (highest
 priority) merge wins each step. run.c then reproduces our exact tokenization.
 
 Two conventions keep the Python trainer and the C encoder bit-identical:
-- **Byte ids = `byte + 3`** — the same offset run.c's byte-fallback path uses,
+- **Byte ids = `byte + 3`**: the same offset run.c's byte-fallback path uses,
   so unknown bytes map the same on both sides.
 - **Leading-space pre-tokenization** (" the" is one unit) means no learned
   token ever spans a word boundary. So run.c's *global* greedy merge and our
-  *per-word* greedy merge partition text identically — which also lets the
+  *per-word* greedy merge partition text identically, which also lets the
   Python encoder cache per unique word and stay fast.
 
 Result: "Once upon a time, there was a little robot" → ~11 tokens instead of
@@ -203,8 +203,8 @@ context reaches ~1000 characters into a story.
 
 TinyStories (~300 MB of the train split used here) is tokenized **once**,
 offline, into a flat `uint16` array on disk (vocab 4096 < 65536, so 2 bytes per
-token). Training memory-maps that array and samples random 256-token windows —
-the GPU never waits on Python. Each story is prefixed with BOS (id 1), so the
+token). Training memory-maps that array and samples random 256-token windows,
+so the GPU never waits on Python. Each story is prefixed with BOS (id 1), so the
 model learns BOS = "a new story starts", and generation from run.c (which
 begins at BOS) opens like a fresh story. 314 MB of text → 78.7 M tokens.
 
@@ -218,23 +218,23 @@ dim=288  n_layers=6  n_heads=6  hidden_dim=768  vocab=4096  seq_len=256
 ```
 
 The shape mirrors Karpathy's stories15M, but with a 4096-vocab instead of
-32000 — most of stories15M's 15M params live in its huge embedding table;
+32000. Most of stories15M's 15M params live in its huge embedding table;
 ours spends them on the transformer blocks instead. Trained on Apple MPS with
 AdamW + cosine LR; the training loop checkpoints the **val-best** weights so we
 keep the best generalizer, not the last (most-overfit) step. One epoch ≈ 4800
-iters, so a few thousand iters stays under a single pass — overfitting is a
+iters, so a few thousand iters stays under a single pass, so overfitting is a
 non-issue at this data:param ratio, the opposite of the Shakespeare regime.
 
-The payoff: real words, multi-sentence coherence, and simple narrative arcs
-("Once upon a time… One day… but then… and they were happy") — the structure
+The payoff: real words, multi-sentence coherence and simple narrative arcs
+("Once upon a time… One day… but then… and they were happy"): the structure
 TinyStories was designed to teach a small model.
 
 ---
 
-## Phase 6 — instruction fine-tuning (`finetune.py`)
+## Phase 6: instruction fine-tuning (`finetune.py`)
 
 The TinyStories base model *continues* text. Phase 6 turns it into a model
-that *follows an instruction* — the difference between a raw language model
+that *follows an instruction*. That's the difference between a raw language model
 and something you can actually prompt. This is **supervised fine-tuning
 (SFT)**, the first stage of how real assistants are built.
 
@@ -246,7 +246,7 @@ Every SFT example is formatted as:
 <s>User: <instruction>
 Assistant: <response></s>
 ```
-No new special tokens — `User:`/`Assistant:` are ordinary text the BPE
+No new special tokens: `User:`/`Assistant:` are ordinary text the BPE
 tokenizer already encodes, and BOS (id 1) is still the stop token `run.c`
 halts on, so the model learns to end its turn. The demo wraps whatever you
 type in this same template before handing it to the engine.
@@ -254,7 +254,7 @@ type in this same template before handing it to the engine.
 ### 2. Loss masking (the one genuinely new idea)
 We only want the model to learn to generate the **response**, not to parrot
 the instruction. So when we build the `(input, target)` pair, every target
-position that sits inside the prompt is set to `-100` — which is PyTorch's
+position that sits inside the prompt is set to `-100`, which is PyTorch's
 `cross_entropy` `ignore_index`, silently dropped from the loss. The gradient
 flows *only* from the answer tokens:
 ```python
@@ -264,10 +264,10 @@ for i in range(len(prompt_ids) - 1):
     y[i] = -100          # ignored by cross_entropy
 ```
 Because `model.py`'s forward already calls `F.cross_entropy` with the default
-`ignore_index=-100`, this needed **zero model changes** — just masked targets.
+`ignore_index=-100`, this needed **zero model changes**, just masked targets.
 
 ### 3. SFT from the pretrained base (transfer learning)
-We load `models/tinystories.pt` and keep training — we are *not* starting from
+We load `models/tinystories.pt` and keep training; we are *not* starting from
 random weights. The base already writes fluent stories; fine-tuning only
 teaches the instruction *format*. Hence a low LR (5e-4) and a few epochs over
 ~50k examples, versus thousands of steps of pretraining.
@@ -277,7 +277,7 @@ There's no external instruction dataset. `finetune.py` builds pairs *from the
 stories themselves*: pull content words out of a story, and the instruction
 becomes "write a story using these words," with the story as the target
 answer. This keeps everything in-domain for the TinyStories tokenizer, and
-makes the task **verifiable** — we can measure what fraction of requested
+makes the task **verifiable**: we can measure what fraction of requested
 words actually appear in generations (the honest quality metric, reported at
 the end of a run).
 
@@ -285,32 +285,32 @@ the end of a run).
 Full-fine-tuning all 7M parameters is fine at this scale; real instruct models
 use **LoRA/PEFT** (train a small adapter, freeze the rest) to avoid updating
 billions of weights, and follow SFT with a preference-alignment stage
-(**RLHF/DPO**). What's here is step one — where instruction-following actually
+(**RLHF/DPO**). What's here is step one, where instruction-following actually
 originates. At 7M params it has no facts, no reasoning, no cross-turn memory;
 it reliably obeys the *format* and *theme* (ask for a robot, get a robot), but
-injecting specific requested words is hit-or-miss — ~24% of random content
+injecting specific requested words is hit-or-miss: ~24% of random content
 words land (common ones far more often than rare ones), measured on held-out
 prompts. The point is that the mechanism is the same one that scales up to real
 assistants.
 
 ---
 
-## Phase 7 — preference alignment with DPO (`gen_prefs.py` + `dpo.py`)
+## Phase 7: preference alignment with DPO (`gen_prefs.py` + `dpo.py`)
 
 SFT taught the model to *answer*. Alignment teaches it which answer is
 *better*. This is the stage that, at scale, turns a raw instruct model into a
-helpful assistant — RLHF in the GPT/Claude lineage. We build the toy version
+helpful assistant: RLHF in the GPT/Claude lineage. We build the toy version
 and point it straight at Phase 6's measured weakness: the ~24% word-inclusion
-rate. Once again, **zero `run.c` changes** — DPO only moves the weights.
+rate. Once again, **zero `run.c` changes**; DPO only moves the weights.
 
-### 1. Preference data — a programmatic judge (`gen_prefs.py`)
+### 1. Preference data: a programmatic judge (`gen_prefs.py`)
 Real RLHF pays humans to pick the better of two responses. We can't, so the
 "reward" is a rule: *did the story use the requested words?* That makes this
 **RLAIF** (AI/rule feedback) rather than RLHF, but the optimizer is the same.
 
-The pairs are **on-policy** — generated by the SFT model itself. For each
+The pairs are **on-policy**, generated by the SFT model itself. For each
 "use these words" prompt we sample K=8 completions, count requested words in
-each, and pair the best (**chosen**) against the worst (**rejected**):
+each and pair the best (**chosen**) against the worst (**rejected**):
 ```python
 scored = sorted((sum(w in text.lower() for w in words), text)
                 for text in sample_k(sft_model, prompt, k=8))
@@ -324,8 +324,8 @@ the judge to find a real preference most of the time.
 Classic RLHF trains a separate reward model, then optimizes it with PPO. **DPO**
 (Rafailov et al., 2023) proves you can optimize the preference pairs directly.
 Two copies of the SFT model:
-- **policy** (trainable) — what we're aligning
-- **reference** (frozen) — an anchor; without it the policy could win every
+- **policy** (trainable): what we're aligning
+- **reference** (frozen): an anchor; without it the policy could win every
   preference by collapsing into degenerate text
 
 Sequence log-probs are summed over the **response tokens only** (the same
@@ -341,10 +341,10 @@ line, no reward model, no RL loop.
 
 ### The result, and the tax
 Both numbers measured identically on held-out prompts, word-inclusion rose
-from **22% (SFT) → 45% (aligned)** — roughly doubled; the model learned to use
+from **22% (SFT) → 45% (aligned)**, roughly doubled; the model learned to use
 the words it's given. The thing to watch is the **alignment tax**, and it's
 visible here: push too hard (β too low, too many steps) and the policy
-*reward-hacks* — e.g. our aligned model sometimes leans on a target word so
+*reward-hacks*. For example, our aligned model sometimes leans on a target word so
 hard it loops ("the dragon flew to the dragon"), or drops a small artifact.
 The frozen reference and a modest β keep that from collapsing into gibberish,
 and the live demo lets you feel the trade-off by switching
@@ -352,17 +352,17 @@ between 💬 Instruct (SFT) and 🎯 Aligned (DPO) on the same three words.
 
 ### What's still missing vs a real assistant
 DPO here optimizes a one-dimensional programmatic reward (word inclusion). Real
-alignment uses *human* preferences over *helpfulness, harmlessness, honesty* —
-many dimensions, no simple rule — and often several rounds. The machinery,
+alignment uses *human* preferences over *helpfulness, harmlessness, honesty*
+(many dimensions, no simple rule) and often several rounds. The machinery,
 though, is exactly this: sample, prefer, optimize against a frozen reference.
 
 ---
 
-## Phase 8 — the road DPO skipped: PPO (`ppo.py`)
+## Phase 8: the road DPO skipped: PPO (`ppo.py`)
 
 DPO was *invented to replace* PPO. Phase 8 builds the thing it replaced, so you
 can hold them side by side. Same starting point (the SFT model), same frozen
-reference, same programmatic reward — the only variable is the **algorithm**.
+reference, same programmatic reward. The only variable is the **algorithm**.
 The critic is training-only, so once again **zero `run.c` changes**.
 
 ### The contrast in one table
@@ -370,20 +370,20 @@ The critic is training-only, so once again **zero `run.c` changes**.
 |---|---|---|
 | signal | offline preference **pairs** | on-policy **rollouts**, regenerated every iter |
 | reward | implicit in the pair | explicit scalar + a **value head** (critic) |
-| advantages | — | **GAE** over per-token rewards |
+| advantages | none | **GAE** over per-token rewards |
 | objective | one `logsigmoid` line | **clipped surrogate** + value loss + entropy + KL |
 | character | supervised, stable, fast (~90s) | RL, finicky, slow (rollouts dominate) |
 
 ### The four moving parts (`ppo.py`)
-1. **Rollout** — the policy generates responses; we record each token's log-prob
+1. **Rollout**: the policy generates responses; we record each token's log-prob
    under the *old* policy and the critic's value estimate. (Sampled from the
-   policy's true distribution — no temperature — so the PPO ratio starts at 1.)
-2. **Reward shaping** — per-token reward = terminal word-inclusion reward on the
+   policy's true distribution, with no temperature, so the PPO ratio starts at 1.)
+2. **Reward shaping**: per-token reward = terminal word-inclusion reward on the
    last token, minus a per-token KL penalty to the reference everywhere else, so
    the policy is pulled toward the reward but tethered to the SFT model.
-3. **GAE** — the value head turns that reward stream into per-token advantages
+3. **GAE**: the value head turns that reward stream into per-token advantages
    (how much better an action was than the critic expected).
-4. **Clipped update** — for K epochs over the rollout, maximize advantage-weighted
+4. **Clipped update**: for K epochs over the rollout, maximize advantage-weighted
    log-prob, but *clip* the probability ratio to `1 ± ε` so no single step moves
    the policy too far (the "proximal" guarantee):
 ```python
@@ -392,46 +392,46 @@ clipped = clamp(ratio, 1-eps, 1+eps) * adv
 loss    = -min(ratio*adv, clipped).mean() + vf_coef*value_loss - ent_coef*entropy
 ```
 
-### The three-way result — and why PPO underperformed
+### The three-way result, and why PPO underperformed
 Measured identically on the held-out word-inclusion test:
 **SFT 22% → DPO 45% → PPO ~22%**. The honest outcome is that **our PPO did not
 beat the SFT baseline.** That's not PPO being incapable (it's the InstructGPT/
-ChatGPT algorithm) — it's PPO being *finicky*, which is the whole point:
+ChatGPT algorithm); it's PPO being *finicky*, which is the whole point:
 
-- `kl_coef=0.1, lr=2e-5` (the shipped run): stable but **flat** — the per-token
+- `kl_coef=0.1, lr=2e-5` (the shipped run): stable but **flat**. The per-token
   KL penalty, summed over ~100 tokens, dwarfed the single terminal reward, so the
   optimizer's equilibrium was "don't move."
-- `kl_coef=0.02, lr=1e-4`: **unstable** — entropy climbed 1.8 → 2.5 and reward
+- `kl_coef=0.02, lr=1e-4`: **unstable**: entropy climbed 1.8 → 2.5 and reward
   *fell*; the policy drifted toward noise.
 - `kl_coef=0.05, lr=3e-5, no entropy bonus`: stable again, but still **flat**.
 
 Three configs, none cleanly beat DPO's robust **first-try** doubling. That IS the
 lesson: PPO's policy gradient is high-variance and tuning-sensitive; DPO's
-contrastive loss is low-variance and robust. Add the *cost asymmetry* — PPO needs
-a critic, GAE, reward shaping, KL/clip tuning, and fresh rollouts every iteration
-(minutes of generation, ~20× the wall-clock) — and you have exactly why DPO
+contrastive loss is low-variance and robust. Add the *cost asymmetry* (PPO needs
+a critic, GAE, reward shaping, KL/clip tuning and fresh rollouts every iteration:
+minutes of generation, ~20× the wall-clock) and you have exactly why DPO
 replaced PPO for straightforward preference alignment, and why RLOO/GRPO later
 dropped the value net too.
 
 ### Honest caveats
 The result is config-dependent: more compute, a learned reward model, group-relative
-baselines (RLOO/GRPO), or careful reward normalization could get PPO to climb. We
-stopped at three configs rather than cherry-pick one until it won — the finding
+baselines (RLOO/GRPO) or careful reward normalization could get PPO to climb. We
+stopped at three configs rather than cherry-pick one until it won. The finding
 *is* the finickiness. And our "reward" is a rule, not a learned reward model over
-human preferences — which Phase 9 finally builds.
+human preferences, which Phase 9 finally builds.
 
 ---
 
-## Phase 9 — RLHF done right, and its favourite failure (`rm.py` + `rloo.py`)
+## Phase 9: RLHF done right, and its favourite failure (`rm.py` + `rloo.py`)
 
 Phase 8 ended with two things missing vs real RLHF: a *learned reward model* and
-a *low-variance estimator*. Phase 9 adds both — and discovers, honestly, the
+a *low-variance estimator*. Phase 9 adds both, and discovers, honestly, the
 most important pitfall in the whole field.
 
 ### 1. The reward model (`rm.py`)
 The middle stage of RLHF that DPO folds away. We train it on the **same
 preference pairs DPO used** (Phase 7's `prefs.jsonl`) with the **Bradley-Terry**
-loss — the chosen response should score higher than the rejected one:
+loss: the chosen response should score higher than the rejected one:
 ```python
 loss = -logsigmoid(reward_model(prompt+chosen) - reward_model(prompt+rejected)).mean()
 ```
@@ -440,13 +440,13 @@ Architecture: the SFT transformer as a backbone + a scalar head on the
 loses whether a specific word appeared 50 tokens back; pooling keeps it, and the
 prompt must be in the pool so the head knows *which* words were asked for).
 
-**Honest limit:** it caps at **~61%** pairwise accuracy — a 7M linear-head probe
+**Honest limit:** it caps at **~61%** pairwise accuracy. A 7M linear-head probe
 on ~1k pairs is a weak judge. That weakness is the whole story of what follows.
 
 ### 2. RLOO (`rloo.py`)
 REINFORCE Leave-One-Out drops PPO's critic, GAE and clipping. Draw *k* samples
-per prompt, score them with the reward model, and let each sample's baseline be
-the mean of the *other* k−1 — an unbiased, low-variance advantage with no value
+per prompt, score them with the reward model and let each sample's baseline be
+the mean of the *other* k−1: an unbiased, low-variance advantage with no value
 net to train:
 ```python
 reward   = reward_model(samples) - kl_coef * kl_to_ref
@@ -456,14 +456,14 @@ loss     = -(( reward - baseline ).detach() * logp_policy).mean()
 
 ### The result: reward hacking, live
 The four-way, all measured identically: **SFT 22% → PPO 22% → RLOO 24% → DPO 45%.**
-RLOO's machinery worked *perfectly* — over 40 iters the reward-model score
+RLOO's machinery worked *perfectly*. Over 40 iters the reward-model score
 **tripled** (−0.63 → +2.38) and the KL to the reference **exploded** (0 → 9.1) as
 the policy chased it. But **word-inclusion barely moved (22% → 24%)**, and the
 outputs degraded into repetition ("waited and waited", "quiet and quiet").
 
-The policy **hacked the weak reward model** — it found directions that satisfied
+The policy **hacked the weak reward model**: it found directions that satisfied
 the RM's 39% error surface instead of actually using the words. This is
-**reward-model overoptimization** — Goodhart's law ("when a measure becomes a
+**reward-model overoptimization**, Goodhart's law ("when a measure becomes a
 target, it ceases to be a good measure"), the central, extensively-studied
 failure mode of RLHF. The RM was the weak link, and RL faithfully optimized the
 wrong thing. Our KL penalty (`kl_coef=0.05`) was too weak to hold it; that knob
@@ -471,16 +471,16 @@ is the standard defense, along with a *stronger* reward model and early stopping
 
 ---
 
-## Phase 10 — fix the reward, and RL climbs (`rm.py` graded pairs)
+## Phase 10: fix the reward, and RL climbs (`rm.py` graded pairs)
 
-Phase 9 blamed the weak reward model. Phase 10 tests that claim by fixing it —
+Phase 9 blamed the weak reward model. Phase 10 tests that claim by fixing it,
 and the same RLOO that hacked now climbs. Nothing about the algorithm changes;
 only the reward model does.
 
 ### Why the weak RM failed: it didn't *grade*
 The tell was in the scores, not the accuracy. Ranking the SFT model's own
 generations by how many requested words they actually contained, the weak RM was
-non-monotone — it scored 1-word stories *higher* than 2-word ones. "Maximize the
+non-monotone: it scored 1-word stories *higher* than 2-word ones. "Maximize the
 reward" therefore didn't mean "use the words," so RLOO climbed the reward (score
 tripled) while the true metric sat still. Its training pairs were **all-or-none**
 (chosen had every word, rejected none), so it never learned the middle.
@@ -488,7 +488,7 @@ tripled) while the true metric sat still. Its training pairs were **all-or-none*
 ### The fix: graded pairs, built from the corpus for free
 Hold the response fixed and vary the **request**. If story A contains
 `{a,b,c,d}`, then asking for `{a,b,c}` is 3/3 satisfied and asking for `{a,y,z}`
-(y,z absent) is 1/3 — *same story, different counts*. A pair (more-present
+(y,z absent) is 1/3: *same story, different counts*. A pair (more-present
 request) > (fewer-present request) teaches the RM to rank by **how many**
 requested words appear:
 ```python
@@ -501,11 +501,11 @@ generations, mean score rises monotonically with word count (0 → 1 → 2), spr
 
 ### The result: the hack becomes a climb
 Same RLOO, same hyperparameters, new reward model. Word-inclusion **22% → 32%**,
-and — the diagnostic that matters — **KL stayed bounded (~4, not 9)**: the policy
+and (the diagnostic that matters) **KL stayed bounded (~4, not 9)**: the policy
 climbed the reward *in-distribution* rather than drifting off to exploit it.
 (One footnote: this RL-drifted policy sits close enough to decision boundaries
 that int8 quantization occasionally flips an argmax, so its fp32 and int8 greedy
-paths diverge slightly — the first model in the repo where they aren't identical.
+paths diverge slightly. It's the first model in the repo where they aren't identical.
 Both stay coherent.)
 
 ### The whole arc, honestly
@@ -513,14 +513,14 @@ Both stay coherent.)
 |---|---|---|
 | SFT | 22% | the starting point |
 | PPO | 22% | naive RL is too high-variance to climb |
-| RLOO + weak RM | 24% | **reward hacking** — Goodhart, RM tripled, metric flat |
+| RLOO + weak RM | 24% | **reward hacking**: Goodhart, RM tripled, metric flat |
 | RLOO + graded RM | **32%** | fix the reward model and the same RL climbs |
 | **DPO** | **45%** | robust, one loss, **no reward model to get right** |
 
-Two conclusions, both earned the hard way. **RL from a reward model works — but
+Two conclusions, both earned the hard way. **RL from a reward model works, but
 only as well as the reward model, and getting the reward model to grade is the
 whole game** (real RLHF pours enormous effort into exactly this). And DPO's quiet
-advantage is that it skips the reward model altogether — which is why a
+advantage is that it skips the reward model altogether, which is why a
 ten-phase tour through PPO, RLOO and reward-model surgery ends by pointing back
 at the simplest method on the board.
 
@@ -528,10 +528,10 @@ at the simplest method on the board.
 
 ## Measuring it honestly (`eval_lift.py`)
 
-"45%" invites the obvious complaint — fewer than half the requested words appear,
+"45%" invites the obvious complaint: fewer than half the requested words appear,
 which is not a good assistant. Fair. But a score is meaningless without its
 **floor**: what does the metric read when the model ignores the instruction
-entirely? One line of control answers it — score each generated story against a
+entirely? One line of control answers it: score each generated story against a
 *different* prompt's requested words:
 
 ```python
@@ -540,7 +540,7 @@ chance = sum(w in gens[i] for w in reqs[(i + 7) % n])    # floor: ~11%
 lift   = hit/tot - chance/tot                            # the real signal
 ```
 
-TinyStories' vocabulary is small and repetitive, so the floor is **~11%** — a
+TinyStories' vocabulary is small and repetitive, so the floor is **~11%**. A
 story that never read the request still contains that many requested words by
 coincidence. Subtracting it inverts the reading:
 
@@ -549,13 +549,13 @@ coincidence. Subtracting it inverts the reading:
 | SFT | 19.6% | 10.4% | **+9.2** | 42.3% | 13.3% |
 | DPO | 43.3% | 11.7% | **+31.7** | 59.6% | 38.8% |
 
-So the honest comparison was never 22% → 45% (a 2× bump) — it's **9 → 32 points
+So the honest comparison was never 22% → 45% (a 2× bump); it's **9 → 32 points
 of real instruction-following, ~3.4×**. A third of SFT's headline was luck; the
 raw numbers were *understating* alignment.
 
 **The benchmark is also harder than it sounds.** `content_words()` picks
 *distinctive* words, so **78%** of what we request is rare. The headline is
-dominated by the hardest version of the task — and a 7M model with a 4096-token
+dominated by the hardest version of the task, and a 7M model with a 4096-token
 vocabulary may not reliably *spell* a rare word (it tokenizes into pieces the
 model seldom emits in sequence). Part of that miss rate is a **capacity ceiling,
 not an alignment failure**.
@@ -564,5 +564,5 @@ not an alignment failure**.
 **±3 points**. DPO's 45% vs RLOO's 32% is a real gap (~4 s.e.); "SFT 22% vs PPO
 22%" is noise agreeing with noise, and no precision should be read into it.
 
-The lesson outlives the number: **know your floor, report the lift, and know
+The lesson outlives the number: **know your floor, report the lift and know
 which part of the task your metric is actually measuring.**

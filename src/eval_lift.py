@@ -1,5 +1,5 @@
 """
-PROMETHEUS — eval_lift.py
+PROMETHEUS: eval_lift.py
 
 The honest version of the word-inclusion metric.
 
@@ -10,10 +10,10 @@ the LIFT over the floor is the number that means something.
 
 The floor is measured with a shuffled control: score each generated story
 against a DIFFERENT prompt's requested words. Same stories, same word
-distribution, no instruction-following possible — whatever it scores is chance.
+distribution, no instruction-following possible, so whatever it scores is chance.
 
 It also splits results by corpus frequency, because `content_words()` picks
-*distinctive* words, so ~78% of what we ask for is rare — the headline is
+*distinctive* words, so ~78% of what we ask for is rare. The headline is
 dominated by the hardest version of the task.
 
     .venv/bin/python src/eval_lift.py                       # SFT vs DPO
@@ -114,7 +114,7 @@ def main():
     rare = sum(1 for w in reqs for x in w if freq[x] < COMMON_CUTOFF)
     total = sum(len(w) for w in reqs)
     print(f"{len(reqs)} prompts / {total} requested words "
-          f"({rare/total:.0%} of them rare — this is a HARD benchmark)")
+          f"({rare/total:.0%} of them rare; this is a HARD benchmark)")
 
     for path in args.models:
         evaluate(path, path.split("/")[-1].replace(".pt", ""), reqs, tok, freq, device)

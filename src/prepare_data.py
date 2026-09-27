@@ -1,5 +1,5 @@
 """
-PROMETHEUS — prepare_data.py
+PROMETHEUS: prepare_data.py
 
 Tokenize the TinyStories corpus ONCE into a flat uint16 array on disk, so
 training just memory-maps it and samples random windows (nanoGPT style).

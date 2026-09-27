@@ -1,4 +1,4 @@
-# PROMETHEUS — llama2-style transformer inference in pure C
+# PROMETHEUS: llama2-style transformer inference in pure C
 #
 #   make            -> optimized build (use this to actually run models)
 #   make debug      -> -O0 -g with sanitizers, for debugging the math

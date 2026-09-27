@@ -1,5 +1,5 @@
 """
-PROMETHEUS — export.py
+PROMETHEUS: export.py
 
 Serializes trained weights into the binaries the C engines mmap:
 
@@ -7,14 +7,14 @@ Serializes trained weights into the binaries the C engines mmap:
   q80    (v2) int8  -> runq.c   "ak42" 256-byte header, group-wise Q8_0
 
 Inputs: either a training checkpoint (ckpt.pt) or an existing legacy fp32
-.bin — the latter means any llama2.c-format model (e.g. Karpathy's
+.bin. The latter means any llama2.c-format model (e.g. Karpathy's
 stories15M.bin) can be quantized without its original PyTorch checkpoint.
 
   python export.py models/ckpt.pt        models/shakespeare.bin
   python export.py models/ckpt.pt        models/shakespeare_q80.bin --q80
   python export.py models/stories15M.bin models/stories15M_q80.bin  --q80
 
-THE ORDER OF TENSORS IS THE CONTRACT — it must match memory_map_weights()
+THE ORDER OF TENSORS IS THE CONTRACT: it must match memory_map_weights()
 in run.c (legacy) / runq.c (q80) field for field.
 
 Q8_0 quantization: split each tensor into groups of --gs values; per group
@@ -30,7 +30,7 @@ import numpy as np
 
 
 # ---------------------------------------------------------------------------
-# weight loading — both sources produce the same plain-numpy structure:
+# weight loading: both sources produce the same plain-numpy structure:
 #   cfg: dict(dim, hidden_dim, n_layers, n_heads, n_kv_heads, vocab_size, seq_len)
 #   t:   dict with 'emb', 'final_norm', 'wcls' (None if tied) and per-layer
 #        lists 'att_norm','ffn_norm','wq','wk','wv','wo','w1','w2','w3'
@@ -103,7 +103,7 @@ def load_from_legacy_bin(path):
 
 
 # ---------------------------------------------------------------------------
-# legacy (v1) fp32 writer — run.c's format
+# legacy (v1) fp32 writer (run.c's format)
 # ---------------------------------------------------------------------------
 
 def write_f32(f, arr):
@@ -160,7 +160,7 @@ def _tensors_from_live_model(model):
 
 
 # ---------------------------------------------------------------------------
-# q80 (v2) int8 writer — runq.c's format
+# q80 (v2) int8 writer (runq.c's format)
 # ---------------------------------------------------------------------------
 
 def q80_quantize(w, gs):
@@ -177,7 +177,7 @@ def q80_quantize(w, gs):
 def q80_export_tensors(cfg, t, path, gs=64):
     # Groups must align with matrix ROWS: runq.c's matmul indexes a weight's
     # scales as (row*n + j)/GS, which is only right if GS divides every row
-    # length (dim and hidden_dim). Shrink GS until it does — Karpathy's
+    # length (dim and hidden_dim). Shrink GS until it does; Karpathy's
     # exporter does the same. (dim=288 models silently corrupt at GS=64:
     # every odd row gets its neighbour's scales.)
     while cfg["dim"] % gs != 0 or cfg["hidden_dim"] % gs != 0:
@@ -209,7 +209,7 @@ def q80_export_tensors(cfg, t, path, gs=64):
         for arr in t["ffn_norm"]: write_f32(f, arr)
         write_f32(f, t["final_norm"])
 
-        # then every matmul weight, quantized — order == runq.c's walk
+        # then every matmul weight, quantized (order == runq.c's walk)
         write_q(f, t["emb"], "emb")
         for name in ("wq", "wk", "wv", "wo", "w1", "w2", "w3"):
             for i, arr in enumerate(t[name]):

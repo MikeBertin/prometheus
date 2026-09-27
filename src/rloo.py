@@ -1,17 +1,17 @@
 """
-PROMETHEUS — rloo.py  (Phase 9, part 2 of 2)
+PROMETHEUS: rloo.py  (Phase 9, part 2 of 2)
 
-RLOO — REINFORCE Leave-One-Out. The modern, value-net-free way to do RLHF, and
+RLOO: REINFORCE Leave-One-Out. The modern, value-net-free way to do RLHF, and
 Phase 9's answer to Phase 8: naive PPO couldn't climb; RLOO + a learned reward
 model does. Two changes fix what was broken:
 
-  1. A learned REWARD MODEL (rm.py) instead of the coarse rule — a dense,
+  1. A learned REWARD MODEL (rm.py) instead of the coarse rule: a dense,
      smooth reward, which is a far better gradient signal.
   2. A LEAVE-ONE-OUT baseline instead of PPO's value head + GAE. For each prompt
      we draw k samples; the baseline for sample i is the mean reward of the
      OTHER k-1 samples. This is an unbiased, low-variance advantage estimate
-     with no critic to train, no GAE, no clipping — the machinery PPO needed and
-     RLOO throws away. (Cohere's RLOO; the same family as GRPO.)
+     with no critic to train, no GAE, no clipping (the machinery PPO needed and
+     RLOO throws away). (Cohere's RLOO; the same family as GRPO.)
 
 Per prompt, for each of the k samples:
     reward_i    = RM(response_i) - kl_coef * KL(policy || ref)_i   # dense reward, tethered

@@ -1,24 +1,24 @@
 """
-PROMETHEUS — gen_prefs.py  (Phase 7, step 1 of 2)
+PROMETHEUS: gen_prefs.py  (Phase 7, step 1 of 2)
 
-Build a PREFERENCE dataset for DPO — the raw material of alignment.
+Build a PREFERENCE dataset for DPO: the raw material of alignment.
 
 Real RLHF collects pairs (prompt, chosen, rejected) where a *human* judged
 chosen > rejected. We can't hand-label thousands of stories, so we use a
-programmatic judge instead — which makes this RLAIF (AI/rule feedback) rather
+programmatic judge instead, which makes this RLAIF (AI/rule feedback) rather
 than RLHF, but the DPO step that consumes these pairs is identical.
 
 The judge is the exact weakness Phase 6 measured: does the story contain the
 requested words? For each "use these words" instruction we sample K
 completions FROM THE SFT MODEL ITSELF (on-policy), count how many requested
-words each contains, and pair the best against the worst. When they differ,
+words each contains and pair the best against the worst. When they differ,
 that's a preference the model can learn from: "more words good, fewer bad."
 
     .venv/bin/python src/gen_prefs.py --prompts 1200 --k 8
     .venv/bin/python src/gen_prefs.py --prompts 60 --k 4 --out data/prefs_smoke.jsonl
 
 Sampling K identical prompts as one batch keeps positions aligned (no padding,
-no RoPE offset headaches) — the only variation across the K is the sampling
+no RoPE offset headaches). The only variation across the K is the sampling
 randomness, which is exactly the diversity we want.
 """
 import argparse
@@ -40,7 +40,7 @@ def sample_k(model, prompt_ids, k, device, max_new=180, temperature=0.9):
     lists (BOS-terminated turns, with the BOS stripped).
 
     Rows that hit BOS are DROPPED from the batch so we don't keep forwarding
-    finished sequences — the active rows always share a length, so the tensor
+    finished sequences. The active rows always share a length, so the tensor
     stays rectangular while it shrinks."""
     was_training = model.training
     model.eval()
@@ -57,7 +57,7 @@ def sample_k(model, prompt_ids, k, device, max_new=180, temperature=0.9):
         keep_rows, keep_slots = [], []
         for row, slot in enumerate(active):
             if int(nxt[row]) == BOS:
-                continue                                  # finished — drop it
+                continue                                  # finished: drop it
             outs[slot].append(int(nxt[row]))
             keep_rows.append(row)
             keep_slots.append(slot)

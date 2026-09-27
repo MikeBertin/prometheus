@@ -1,7 +1,7 @@
 """
-PROMETHEUS — rm.py  (Phase 9, part 1 of 2)
+PROMETHEUS: rm.py  (Phase 9, part 1 of 2)
 
-A REWARD MODEL — the piece both the DPO and PPO toys deliberately skipped.
+A REWARD MODEL: the piece both the DPO and PPO toys deliberately skipped.
 
 Real RLHF has three stages: SFT, then train a reward model on human preference
 pairs, then RL against that reward model. DPO folds all three into one loss;
@@ -10,15 +10,15 @@ real middle stage: a model that LEARNS to score responses from the preference
 pairs, and outputs a continuous reward for any response.
 
 Why bother, when the rule is right there? Two reasons that matter for Phase 9:
-  - The rule is COARSE — with 2-3 words it can only return 0, ½, ⅓, ⅔, 1. A
+  - The rule is COARSE. With 2-3 words it can only return 0, ½, ⅓, ⅔, 1. A
     learned RM gives a smooth, dense score, which is a far better gradient
     signal for RL (part of why Phase-8 PPO couldn't climb).
-  - It GENERALIZES — the RM scores partial progress and phrasing the rule can't
+  - It GENERALIZES: the RM scores partial progress and phrasing the rule can't
     see, exactly as a human-trained RM generalizes past its labels.
 
 Architecture: the SFT transformer as a backbone + a scalar head on the LAST
 token's hidden state (which has attended to the whole response). Trained with
-the Bradley-Terry loss — the chosen response should score higher than the
+the Bradley-Terry loss: the chosen response should score higher than the
 rejected one:  loss = -log sigmoid(r(chosen) - r(rejected)).
 
     .venv/bin/python src/rm.py --epochs 3
@@ -40,7 +40,7 @@ from finetune import BOS, content_words
 
 class RewardModel(nn.Module):
     """SFT backbone + a scalar reward head. The reward is a MEAN-POOL of the
-    hidden states over the RESPONSE tokens — a single summary token loses
+    hidden states over the RESPONSE tokens. A single summary token loses
     whether a specific word appeared 50 tokens back, but pooling aggregates that
     per-token signal, which is exactly what the word-inclusion preference needs."""
     def __init__(self, margs):
@@ -66,14 +66,14 @@ def encode_side(tok, prompt, response, seq_len):
 
 
 def build_corpus_pairs(corpus_path, tok, seq_len, n, seed=0):
-    """GRADED preference pairs straight from the corpus — no generation, so
+    """GRADED preference pairs straight from the corpus. No generation, so
     thousands appear in seconds.
 
     The trick: hold the response (story A) fixed and vary the REQUEST. If A
     contains words {a,b,c,d}, then asking for {a,b,c} is 3/3 satisfied, asking
     for {a,y,z} (y,z absent) is 1/3. So a pair (request with more of its words
     present) > (request with fewer) teaches the reward model to grade by HOW
-    MANY requested words appear — the graded signal all-or-none pairs never
+    MANY requested words appear: the graded signal all-or-none pairs never
     gave it, and exactly what RLOO needs to climb instead of hack."""
     text = open(corpus_path, encoding="utf-8", errors="replace").read()
     stories = [s.strip() for s in re.split(r"<\|endoftext\|>", text) if s.strip()]

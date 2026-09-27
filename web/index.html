@@ -3,12 +3,12 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>PROMETHEUS — a language model from scratch in C, running in your browser</title>
+<title>PROMETHEUS · a language model from scratch in C, running in your browser</title>
 <link rel="icon" href="favicon.svg" type="image/svg+xml">
-<meta name="description" content="A Llama-style transformer written from scratch in pure C — trained on Shakespeare, compiled to WebAssembly, generating live in your browser. Every line of the forward pass, annotated.">
+<meta name="description" content="A Llama-style transformer written from scratch in pure C, trained on Shakespeare, compiled to WebAssembly, generating live in your browser. Every line of the forward pass, annotated.">
 <meta property="og:type" content="website">
-<meta property="og:title" content="PROMETHEUS — an LLM from scratch in C, generating in your browser">
-<meta property="og:description" content="RMSNorm, RoPE, attention, a KV cache and a sampler — ~600 lines of hand-written C, running a self-trained 2.26M-parameter Shakespeare model live via WASM.">
+<meta property="og:title" content="PROMETHEUS · an LLM from scratch in C, generating in your browser">
+<meta property="og:description" content="RMSNorm, RoPE, attention, a KV cache and a sampler: ~600 lines of hand-written C, running a self-trained 2.26M-parameter Shakespeare model live via WASM.">
 <meta property="og:url" content="https://mikebertin.github.io/prometheus/">
 <meta property="og:image" content="https://mikebertin.github.io/prometheus/og.png">
 <meta name="twitter:card" content="summary_large_image">
@@ -198,6 +198,16 @@
     .hero h1 { font-size:23px; }
   }
   @media (max-width:600px) { .side { padding:18px 16px; } nav { display:none; } }
+
+  footer .hub { display:inline-flex; align-items:center; gap:6px; margin-top:10px; font-size:12px; }
+  footer .hub img { display:block; }
+
+  /* reduced motion: no pulses, blinks, fades or smooth scroll */
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior:auto; }
+    *, *::before, *::after { animation-duration:.01ms !important; animation-iteration-count:1 !important;
+      transition-duration:.01ms !important; }
+  }
 </style>
 </head>
 <body>
@@ -218,11 +228,11 @@
 
     <main>
       <section class="hero">
-        <h1>A transformer language model, written from scratch in C —<br><span class="g">generating in your browser.</span></h1>
+        <h1>A transformer language model, written from scratch in C,<br><span class="g">generating in your browser.</span></h1>
         <p class="sub">~600 lines of hand-written C: RMSNorm, rotary embeddings, multi-head attention with a KV
-          cache, a BPE tokenizer and a top-p sampler. Three self-trained models — an
-          <em>instruction-tuned</em> one that follows a prompt, its TinyStories base, and a byte-level
-          Shakespeare model — all <em>int8-quantized</em> and run by the same C engine compiled to
+          cache, a BPE tokenizer and a top-p sampler. Three self-trained models (an
+          <em>instruction-tuned</em> one that follows a prompt, its TinyStories base and a byte-level
+          Shakespeare model) are all <em>int8-quantized</em> and run by the same C engine compiled to
           WebAssembly. Pick one below. No libraries, no frameworks, no API calls.</p>
 
         <div class="crt">
@@ -247,16 +257,16 @@
           <div class="crt-screen"><pre id="out"><span class="loading">loading 8 MB of int8 weights…</span></pre></div>
         </div>
         <p class="hint">The <b>Instruct</b> model wraps your text in a <code>User: … Assistant:</code> template and
-          writes a story to order — try naming three words. Each passage <em>ends itself</em>: the model emits its
+          writes a story to order. Try naming three words. Each passage <em>ends itself</em>: the model emits its
           beginning-of-sequence token when the turn is done. Temperature 0 is greedy and deterministic; crank it
           past 1.0 for chaos. Every token is a <em>full forward pass</em> through all six layers, in C, on your
-          CPU — and the models even swap tokenizers (byte-level vs 4096-vocab BPE) live in the engine.</p>
+          CPU, and the models even swap tokenizers (byte-level vs 4096-vocab BPE) live in the engine.</p>
       </section>
 
       <div class="wt-head">
-        <h2>How it works — the actual code</h2>
+        <h2>How it works: the actual code</h2>
         <p>Every snippet below is really in the engine generating above. Follow one token through the machine:
-          from a file of floats, through the forward pass, out the sampler — and then how the weights got
+          from a file of floats, through the forward pass, out the sampler. After that, see how the weights got
           trained in the first place.</p>
       </div>
 
@@ -273,7 +283,7 @@
               prompt is still being fed in, the "next token" is forced to be your prompt; after that, the model
               is on its own.</p>
           </header>
-          <div class="code-wrap"><span class="file">src/run.c — generate()</span>
+          <div class="code-wrap"><span class="file">src/run.c: generate()</span>
           <pre><code data-lang="c">while (pos &lt; steps) {
     float* logits = forward(t, token, pos);   // the whole network, once
     next = (pos &lt; num_prompt_tokens - 1)
@@ -291,16 +301,16 @@
             <span class="tag">02 · the checkpoint</span>
             <h3>A model is a file of floats</h3>
             <p>The entire model is one flat binary: a 28-byte header of seven ints, then every weight matrix
-              as raw float32, in a fixed order. We <span class="term" data-tip="mmap lets the OS page the file into memory lazily — no giant malloc+read, and the weights are shared read-only.">mmap</span>
+              as raw float32, in a fixed order. We <span class="term" data-tip="mmap lets the OS page the file into memory lazily: no giant malloc+read, and the weights are shared read-only.">mmap</span>
               it and never copy: the "loaded model" is just pointers into the file.</p>
           </header>
-          <div class="code-wrap"><span class="file">src/run.c — Config + read_checkpoint()</span>
+          <div class="code-wrap"><span class="file">src/run.c: Config + read_checkpoint()</span>
           <pre><code data-lang="c">typedef struct {
     int dim;        // width of the residual stream   (192 here)
     int hidden_dim; // feed-forward inner width       (512)
     int n_layers;   // transformer blocks stacked     (5)
     int n_heads;    // attention heads                (6)
-    int n_kv_heads; // key/value heads                (6 — no grouping)
+    int n_kv_heads; // key/value heads                (6, no grouping)
     int vocab_size; // distinct tokens                (259)
     int seq_len;    // max context length             (256)
 } Config;
@@ -313,13 +323,13 @@ fread(config, sizeof(Config), 1, file);   // the 28-byte header...
           <header>
             <span class="tag">03 · weight layout</span>
             <h3>Laying pointers over the blob</h3>
-            <p>No deserialization — each weight tensor is found by walking a pointer through the mapped file in
+            <p>No deserialization. Each weight tensor is found by walking a pointer through the mapped file in
               the exact order the exporter wrote it. This ordering <em>is</em> the file format. One neat trick:
               if the header's vocab_size is positive, the final classifier is
               <span class="term" data-tip="Weight tying: the same (vocab × dim) matrix embeds tokens on the way in and scores them on the way out. Saves a third of this model's parameters.">tied</span>
-              to the embedding table — the same matrix used twice.</p>
+              to the embedding table: the same matrix used twice.</p>
           </header>
-          <div class="code-wrap"><span class="file">src/run.c — memory_map_weights()</span>
+          <div class="code-wrap"><span class="file">src/run.c: memory_map_weights()</span>
           <pre><code data-lang="c">w-&gt;token_embedding_table = ptr;  ptr += vocab_size * dim;
 w-&gt;rms_att_weight = ptr;         ptr += n_layers * dim;
 w-&gt;wq = ptr;                     ptr += n_layers * dim * dim;
@@ -335,13 +345,13 @@ w-&gt;wcls = shared_weights ? w-&gt;token_embedding_table  // tied: reuse it
           <header>
             <span class="tag">04 · residual stream</span>
             <h3>One vector, edited by every layer</h3>
-            <p>The spine of a transformer is the <span class="term" data-tip="A vector of size dim (192 here) that flows through the whole network — the model's running 'thought' about what comes next.">residual stream</span>
-              — the token's embedding, which each sub-layer reads, computes a correction to, and <em>adds back</em>.
+            <p>The spine of a transformer is the <span class="term" data-tip="A vector of size dim (192 here) that flows through the whole network: the model's running 'thought' about what comes next.">residual stream</span>:
+              the token's embedding, which each sub-layer reads, computes a correction to and <em>adds back</em>.
               Information is never overwritten, only edited. That additive structure is why deep transformers
               train stably.</p>
           </header>
-          <div class="code-wrap"><span class="file">src/run.c — forward()</span>
-          <pre><code data-lang="c">// x IS the model's running "thought" — start it as the token's embedding
+          <div class="code-wrap"><span class="file">src/run.c: forward()</span>
+          <pre><code data-lang="c">// x IS the model's running "thought"; start it as the token's embedding
 memcpy(x, w-&gt;token_embedding_table + token * dim, dim * sizeof(float));
 
 for (int l = 0; l &lt; p-&gt;n_layers; l++) {
@@ -380,10 +390,10 @@ for (int l = 0; l &lt; p-&gt;n_layers; l++) {
               <line x1="408" y1="69" x2="438" y2="69" stroke="#8a7f6b" marker-end="url(#arr)"/>
               <line x1="516" y1="69" x2="546" y2="69" stroke="#8a7f6b" marker-end="url(#arr)"/>
               <path d="M598 88 L598 132 L43 132 L43 90" fill="none" stroke="#bb6528" stroke-dasharray="4 3" marker-end="url(#arr)"/>
-              <text x="320" y="146" text-anchor="middle" fill="#8a7f6b">the sampled token becomes the next input — autoregression</text>
+              <text x="320" y="146" text-anchor="middle" fill="#8a7f6b">the sampled token becomes the next input: autoregression</text>
             </g>
           </svg>
-          <p class="cap">One token in, one probability distribution out — looped.</p>
+          <p class="cap">One token in, one probability distribution out, looped.</p>
         </div>
 
         <div class="step" id="s5" data-n="05" data-phase="fwd">
@@ -391,11 +401,11 @@ for (int l = 0; l &lt; p-&gt;n_layers; l++) {
             <span class="tag">05 · rmsnorm</span>
             <h3>Keeping the numbers sane</h3>
             <p>Before every sub-layer, the stream is rescaled to unit
-              <span class="term" data-tip="Root mean square: sqrt(mean(x²)). RMSNorm divides by it — no mean-subtraction, no bias. Llama's cheaper take on LayerNorm.">RMS</span>
+              <span class="term" data-tip="Root mean square: sqrt(mean(x²)). RMSNorm divides by it, with no mean-subtraction and no bias. Llama's cheaper take on LayerNorm.">RMS</span>
               and given a learned per-dimension gain. Five lines. Without it, activations drift in scale as
               they pass through dozens of matmuls and training falls apart.</p>
           </header>
-          <div class="code-wrap"><span class="file">src/run.c — rmsnorm()</span>
+          <div class="code-wrap"><span class="file">src/run.c: rmsnorm()</span>
           <pre><code data-lang="c">void rmsnorm(float* o, float* x, float* weight, int size) {
     float ss = 0.0f;
     for (int j = 0; j &lt; size; j++) ss += x[j] * x[j];
@@ -408,12 +418,12 @@ for (int l = 0; l &lt; p-&gt;n_layers; l++) {
           <header>
             <span class="tag">06 · matmul</span>
             <h3>Where all the time goes</h3>
-            <p>Every projection in the network — queries, keys, values, outputs, both feed-forward wings, the
-              classifier — is this one function. Each output element is a dot product of one weight row with the
+            <p>Every projection in the network (queries, keys, values, outputs, both feed-forward wings, the
+              classifier) is this one function. Each output element is a dot product of one weight row with the
               input. This loop is ~95% of the runtime; every LLM speed trick you've heard of (quantization,
               GPU kernels, batching) is fundamentally about making <em>this</em> faster.</p>
           </header>
-          <div class="code-wrap"><span class="file">src/run.c — matmul()</span>
+          <div class="code-wrap"><span class="file">src/run.c: matmul()</span>
           <pre><code data-lang="c">// out = W @ x   where W is (d, n) row-major, x is (n,)
 void matmul(float* out, float* x, float* w, int n, int d) {
     for (int i = 0; i &lt; d; i++) {
@@ -429,16 +439,16 @@ void matmul(float* out, float* x, float* w, int n, int d) {
           <header>
             <span class="tag">07 · rope</span>
             <h3>Position as rotation</h3>
-            <p>The network has no idea <em>where</em> a token sits — attention is order-blind. RoPE fixes this by
+            <p>The network has no idea <em>where</em> a token sits; attention is order-blind. RoPE fixes this by
               <em>rotating</em> each adjacent pair of query/key dimensions by an angle proportional to the token's
-              position (faster for low dims, slower for high — a spectrum of frequencies). The magic: after
+              position (faster for low dims, slower for high: a spectrum of frequencies). The magic: after
               rotation, the dot product between a query and key depends only on their <em>relative</em> distance.</p>
           </header>
-          <div class="code-wrap"><span class="file">src/run.c — forward(), RoPE</span>
+          <div class="code-wrap"><span class="file">src/run.c: forward(), RoPE</span>
           <pre><code data-lang="c">for (int i = 0; i &lt; dim; i += 2) {
     float freq = 1.0f / powf(10000.0f, (i % head_size) / (float)head_size);
     float fcr = cosf(pos * freq), fci = sinf(pos * freq);
-    // rotate the pair (v0, v1) by angle pos*freq — complex multiplication
+    // rotate the pair (v0, v1) by angle pos*freq (complex multiplication)
     float v0 = vec[i], v1 = vec[i + 1];
     vec[i]     = v0 * fcr - v1 * fci;
     vec[i + 1] = v0 * fci + v1 * fcr;
@@ -449,14 +459,14 @@ void matmul(float* out, float* x, float* w, int n, int d) {
           <header>
             <span class="tag">08 · attention</span>
             <h3>The only place tokens meet</h3>
-            <p>Everything else operates on each position independently — attention is where context flows. Each
+            <p>Everything else operates on each position independently. Attention is where context flows. Each
               head scores the current token's <em>query</em> against every previous token's <em>key</em>,
               softmaxes the scores into weights, and takes that weighted blend of their <em>values</em>. Past
-              keys/values sit in the <span class="term" data-tip="The KV cache: keys and values computed once per position and remembered, so step t costs O(t) instead of recomputing the whole prefix — this is why chatbots stream fast.">KV cache</span>.</p>
+              keys/values sit in the <span class="term" data-tip="The KV cache: keys and values computed once per position and remembered, so step t costs O(t) instead of recomputing the whole prefix. This is why chatbots stream fast.">KV cache</span>.</p>
             <p>And notice what's missing: there is no causal mask anywhere. A token <em>physically cannot</em> see
               the future, because the future isn't in the cache yet. The loop bound <em>is</em> the mask.</p>
           </header>
-          <div class="code-wrap"><span class="file">src/run.c — forward(), one head</span>
+          <div class="code-wrap"><span class="file">src/run.c: forward(), one head</span>
           <pre><code data-lang="c">for (int t = 0; t &lt;= pos; t++) {              // every position so far
     float* kt = key_cache + t*kv_dim + head_offset;
     float score = 0.0f;
@@ -478,10 +488,10 @@ for (int t = 0; t &lt;= pos; t++) {              // blend the values
             <p>After attention gathers context, the feed-forward block does the per-token "thinking": expand to a
               wider hidden space through two parallel projections, gate one with the other using
               <span class="term" data-tip="SiLU (swish): x·sigmoid(x). Smooth, non-monotonic, empirically better than ReLU in transformers.">SiLU</span>,
-              contract back down. Most of the model's parameters — and most of what it <em>knows</em> — are in
+              contract back down. Most of the model's parameters (and most of what it <em>knows</em>) are in
               these three matrices per layer.</p>
           </header>
-          <div class="code-wrap"><span class="file">src/run.c — forward(), SwiGLU</span>
+          <div class="code-wrap"><span class="file">src/run.c: forward(), SwiGLU</span>
           <pre><code data-lang="c">matmul(s-&gt;hb,  s-&gt;xb, w-&gt;w1 + ..., dim, hidden_dim);   // gate path
 matmul(s-&gt;hb2, s-&gt;xb, w-&gt;w3 + ..., dim, hidden_dim);   // up path
 for (int i = 0; i &lt; hidden_dim; i++) {
@@ -497,11 +507,11 @@ matmul(s-&gt;xb, s-&gt;hb, w-&gt;w2 + ..., hidden_dim, dim);    // back down</co
             <span class="tag">10 · logits</span>
             <h3>259 opinions about what comes next</h3>
             <p>After the last layer: one final norm, then the residual stream is scored against every row of the
-              (tied) embedding table. The result is a raw score — a <em>logit</em> — for each of the 259 tokens
+              (tied) embedding table. The result is a raw score, a <em>logit</em>, for each of the 259 tokens
               in the vocabulary. That vector is the model's entire output; everything after this is just
               deciding how to pick from it.</p>
           </header>
-          <div class="code-wrap"><span class="file">src/run.c — forward(), the head</span>
+          <div class="code-wrap"><span class="file">src/run.c: forward(), the head</span>
           <pre><code data-lang="c">rmsnorm(x, x, w-&gt;rms_final_weight, dim);
 matmul(s-&gt;logits, x, w-&gt;wcls, dim, p-&gt;vocab_size);  // one score per token
 return s-&gt;logits;</code></pre></div>
@@ -515,10 +525,10 @@ return s-&gt;logits;</code></pre></div>
             <h3>One byte, one token</h3>
             <p>Real Llama uses 32,000 learned <span class="term" data-tip="Byte-pair encoding: start from characters, repeatedly merge the most common adjacent pair into a new token. 'th'+'e' → 'the'.">BPE</span>
               merges. This model goes simpler: the vocabulary is just <em>the 256 possible bytes</em> (plus 3
-              specials). Nothing to train, and the C encode/decode machinery — including the full BPE merge
-              loop — works unchanged; it simply finds nothing to merge. The price: one byte = one token, so 256
+              specials). Nothing to train, and the C encode/decode machinery (including the full BPE merge
+              loop) works unchanged; it simply finds nothing to merge. The price: one byte = one token, so 256
               context tokens ≈ 256 characters. The TinyStories model (step 18) swaps in a <em>real</em> 4096-vocab
-              BPE tokenizer — same C code, learned merges instead of none.</p>
+              BPE tokenizer: same C code, learned merges instead of none.</p>
           </header>
           <div class="code-wrap"><span class="file">src/tokenizer_export.py</span>
           <pre><code data-lang="py"># id 0..2: &lt;unk&gt; &lt;s&gt; &lt;/s&gt;, then one token per raw byte
@@ -537,9 +547,9 @@ tokens = [b"&lt;unk&gt;", b"&lt;s&gt;", b"&lt;/s&gt;"] + [token_string(b) for b 
             <p><span class="term" data-tip="Dividing logits by T before softmax. T→0 sharpens toward the argmax (deterministic); T>1 flattens toward uniform (chaotic).">Temperature</span>
               reshapes the distribution, then <span class="term" data-tip="Nucleus sampling: keep only the smallest set of tokens whose probabilities sum to p (0.9 here), renormalize, sample from those.">top-p</span>
               cuts off the long tail of unlikely tokens before drawing. That's the whole difference between the
-              temp-0 and temp-1.4 output in the demo above — same model, same logits, different dice.</p>
+              temp-0 and temp-1.4 output in the demo above. Same model, same logits, different dice.</p>
           </header>
-          <div class="code-wrap"><span class="file">src/run.c — sample()</span>
+          <div class="code-wrap"><span class="file">src/run.c: sample()</span>
           <pre><code data-lang="c">if (temperature == 0.0f) return sample_argmax(logits, n);  // greedy
 
 for (int q = 0; q &lt; n; q++) logits[q] /= temperature;  // reshape...
@@ -548,18 +558,18 @@ float coin = random_f32(&amp;rng_state);                   // ...and roll
 return sample_topp(logits, n, topp, probindex, coin);  // within the nucleus</code></pre></div>
         </div>
 
-        <div class="phase-row"><span class="label">Training — Where The Weights Came From</span></div>
+        <div class="phase-row"><span class="label">Training: Where The Weights Came From</span></div>
 
         <div class="step" id="s13" data-n="13" data-phase="train">
           <header>
             <span class="tag">13 · the twin</span>
             <h3>The same model, written twice</h3>
-            <p>The weights were trained by a PyTorch model that mirrors run.c <em>exactly</em> — same RMSNorm
+            <p>The weights were trained by a PyTorch model that mirrors run.c <em>exactly</em>: same RMSNorm
               epsilon, same RoPE base and pairing convention, same tied classifier. Get any one of those wrong
-              and the exported model produces fluent garbage: the file loads fine, the math runs fine, and every
+              and the exported model produces fluent garbage: the file loads fine, the math runs fine and every
               number is subtly wrong. The two implementations agreeing <em>is</em> the correctness proof.</p>
           </header>
-          <div class="code-wrap"><span class="file">src/model.py — the contract knobs</span>
+          <div class="code-wrap"><span class="file">src/model.py: the contract knobs</span>
           <pre><code data-lang="py">@dataclass
 class ModelArgs:
     dim: int = 192          # residual stream width
@@ -569,16 +579,16 @@ class ModelArgs:
     hidden_dim: int = 512
     max_seq_len: int = 256
     norm_eps: float = 1e-5  # MUST match run.c's rmsnorm
-    # RoPE: base 10000, ADJACENT-pair rotation (i, i+1) — run.c's
+    # RoPE: base 10000, ADJACENT-pair rotation (i, i+1), run.c's
     # convention, NOT HuggingFace's rotate-half. One wrong knob = garbage.</code></pre></div>
         </div>
 
         <div class="step" id="s14" data-n="14" data-phase="train">
           <header>
             <span class="tag">14 · training</span>
-            <h3>Watching it learn — then memorize</h3>
+            <h3>Watching it learn, then memorize</h3>
             <p>2.26M parameters, ~1.1M tokens of Shakespeare, AdamW, six minutes on a laptop GPU. Loss starts at
-              5.56 — exactly ln(259), the loss of pure guessing — and the curves below are the real run. Around
+              5.56 (exactly ln(259), the loss of pure guessing) and the curves below are the real run. Around
               iteration 750 the <em>validation</em> loss bottoms out and turns back up while training loss keeps
               falling: the model has started memorizing its corpus instead of learning English. The shipped
               checkpoint is the one from the bottom of the valley.</p>
@@ -605,7 +615,7 @@ class ModelArgs:
                 points="50,20.6 121,152.7 192,159.5 264,163.0 335,166.1 406,169.8 478,173.1 549,175.9 620,177.7"/>
               <circle cx="264" cy="150.8" r="5" fill="none" stroke="#7ee787" stroke-width="2"/>
               <line x1="264" y1="150.8" x2="264" y2="60" stroke="#7ee787" stroke-dasharray="3 3" opacity=".6"/>
-              <text x="264" y="50" text-anchor="middle" fill="#7ee787">iter 750 — val bottoms at 1.53: ship this one</text>
+              <text x="264" y="50" text-anchor="middle" fill="#7ee787">iter 750: val bottoms at 1.53, ship this one</text>
               <text x="560" y="128" fill="#ffa657">val ↗ memorizing</text>
               <text x="560" y="190" fill="#79c0ff">train ↘</text>
             </g>
@@ -619,17 +629,17 @@ class ModelArgs:
             <span class="tag">15 · export</span>
             <h3>The handshake between two worlds</h3>
             <p>Export is just serialization discipline: write the 7-int header, then dump every tensor in exactly
-              the order step 03's pointer walk reads them. PyTorch stores linear weights as (out, in) row-major —
-              the very layout run.c's matmul indexes — so there's not even a transpose. Train in Python,
+              the order step 03's pointer walk reads them. PyTorch stores linear weights as (out, in) row-major,
+              the very layout run.c's matmul indexes, so there's not even a transpose. Train in Python,
               run anywhere C runs. Which, via WebAssembly, includes the page you're reading.</p>
           </header>
-          <div class="code-wrap"><span class="file">src/export.py — legacy_export()</span>
+          <div class="code-wrap"><span class="file">src/export.py: legacy_export()</span>
           <pre><code data-lang="py">f.write(struct.pack("&lt;7i", dim, hidden_dim, n_layers,
                     n_heads, n_kv_heads, vocab_size, seq_len))
 serialize_fp32(f, model.tok_embeddings.weight)
 for layer in model.layers: serialize_fp32(f, layer.attention_norm.weight)
 for layer in model.layers: serialize_fp32(f, layer.attention.wq.weight)
-# ...wk, wv, wo, ffn norms, w1, w2, w3, final norm —
+# ...wk, wv, wo, ffn norms, w1, w2, w3, final norm:
 # the exact order memory_map_weights() walks. This order IS the format.</code></pre></div>
         </div>
 
@@ -639,16 +649,16 @@ for layer in model.layers: serialize_fp32(f, layer.attention.wq.weight)
           <header>
             <span class="tag">16 · int8</span>
             <h3>Four bytes into one</h3>
-            <p>Step 06 said matmul is where all the time goes — but it's not the <em>multiplies</em>, it's
+            <p>Step 06 said matmul is where all the time goes, but it's not the <em>multiplies</em>, it's
               streaming the weight bytes from memory. So: store each weight as an int8 plus one fp32
-              <span class="term" data-tip="Q8_0: per group of consecutive values, scale = max|w|/127, then q = round(w/scale). Symmetric, group-wise — one outlier only poisons its own group.">scale
-              per group of 64</span>, quantize the activations on the fly, and run the inner loop in pure
+              <span class="term" data-tip="Q8_0: per group of consecutive values, scale = max|w|/127, then q = round(w/scale). Symmetric and group-wise, so one outlier only poisons its own group.">scale
+              per group of 64</span>, quantize the activations on the fly and run the inner loop in pure
               integer arithmetic. 4× less memory traffic, 4× smaller file. What stays fp32: the norms, the KV
-              cache, everything between ops — precision where it's cheap, bytes saved where it's expensive.</p>
+              cache, everything between ops: precision where it's cheap, bytes saved where it's expensive.</p>
             <p>This isn't hypothetical: the engine generating above is <em>runq.c</em>, and the 2.4 MB you
               downloaded (instead of 9.1) is the quantized checkpoint.</p>
           </header>
-          <div class="code-wrap"><span class="file">src/runq.c — quantize() + matmul()</span>
+          <div class="code-wrap"><span class="file">src/runq.c: quantize() + matmul()</span>
           <pre><code data-lang="c">// activations -&gt; int8, one scale per group, right before each matmul
 float scale = wmax / 127.0f;
 qx-&gt;q[i] = (int8_t)roundf(x[i] / scale);
@@ -666,15 +676,15 @@ for (int j = 0; j &lt;= n - GS; j += GS) {
           <header>
             <span class="tag">17 · a war story</span>
             <h3>The bug that spoke in tongues</h3>
-            <p>First int8 run of a dim-288 model: fluent English with random exotic tokens sprinkled in —
+            <p>First int8 run of a dim-288 model: fluent English with random exotic tokens sprinkled in:
               <em>"there was a little girl named<b>opts</b>a"</em>. Cause: 288 isn't divisible by the group
               size 64, so quantization groups straddled matrix rows and every <em>odd</em> row read its
-              neighbour's scales. Half the vocabulary's logits corrupted, half perfect — a model that's
+              neighbour's scales. Half the vocabulary's logits corrupted, half perfect: a model that's
               simultaneously right and wrong. Our Shakespeare model (dims 192/512) masked the bug completely.</p>
             <p>The lesson quantized models teach: they fail <em>eloquently</em>. Nothing crashes; the text
-              just gets strange. The fix is one invariant — groups must align with rows — enforced twice:</p>
+              just gets strange. The fix is one invariant (groups must align with rows), enforced twice:</p>
           </header>
-          <div class="code-wrap"><span class="file">src/export.py + src/runq.c — the invariant, both sides</span>
+          <div class="code-wrap"><span class="file">src/export.py + src/runq.c: the invariant, both sides</span>
           <pre><code data-lang="py"># export.py: shrink the group size until it divides every row length
 while cfg["dim"] % gs != 0 or cfg["hidden_dim"] % gs != 0:
     gs //= 2
@@ -689,18 +699,18 @@ while cfg["dim"] % gs != 0 or cfg["hidden_dim"] % gs != 0:
           <header>
             <span class="tag">18 · real BPE</span>
             <h3>From letters to words</h3>
-            <p>Try the <b>📖 TinyStories</b> model at the top — it reads far better than Shakespeare, for two
+            <p>Try the <b>📖 TinyStories</b> model at the top. It reads far better than Shakespeare, for two
               reasons. First, a <em>real</em> byte-pair-encoding tokenizer, trained from scratch: start from the
               256 bytes and repeatedly fuse the most common adjacent pair into a new token, to a vocab of 4096.
               The first merges it learns on children's stories are <code>he</code>, <code>&nbsp;t</code>,
-              <code>&nbsp;a</code>, <code>the</code> — the statistical skeleton of English. Now "Once upon a
+              <code>&nbsp;a</code>, <code>the</code>: the statistical skeleton of English. Now "Once upon a
               time" is ~4 tokens, not 16, so the same 256-token window reaches four times deeper into a story.</p>
-            <p>And — the recurring theme of this whole project — <em>run.c needed zero changes</em>. Its encode()
+            <p>And, the recurring theme of this whole project, <em>run.c needed zero changes</em>. Its encode()
               was already a greedy "merge the highest-scored pair" loop, which is exactly BPE. We just write the
               learned merges into the same tokenizer file with <code>score = -rank</code>, and the C engine
               reproduces our tokenization for free.</p>
           </header>
-          <div class="code-wrap"><span class="file">src/bpe.py — the entire training algorithm</span>
+          <div class="code-wrap"><span class="file">src/bpe.py: the entire training algorithm</span>
           <pre><code data-lang="py">for i in range(n_merges):
     pairs = Counter()                        # count every adjacent pair
     for word, freq in corpus.items():
@@ -716,15 +726,15 @@ while cfg["dim"] % gs != 0 or cfg["hidden_dim"] % gs != 0:
             <span class="tag">19 · more data</span>
             <h3>Seven million parameters, a real corpus</h3>
             <p>Second reason: scale. The Shakespeare model saw ~1 MB of text; this one trained on
-              <em>~300 MB of TinyStories</em> — 79 million tokens, tokenized once into a memory-mapped
+              <em>~300 MB of TinyStories</em>: 79 million tokens, tokenized once into a memory-mapped
               <code>uint16</code> array so the GPU never waits on Python. The model itself grew to
               <em>7.2M parameters</em> (dim 288, 6 layers), the shape of Karpathy's stories15M but with our
               leaner 4096 vocab. One epoch is ~4,800 steps, so a few thousand steps of training never even
-              finishes a full pass — the opposite of the Shakespeare model, which memorized its tiny corpus.
+              finishes a full pass, the opposite of the Shakespeare model, which memorized its tiny corpus.
               The result is what you're reading: real words, whole sentences, little arcs with a beginning and
               a "happily ever after".</p>
           </header>
-          <div class="code-wrap"><span class="file">src/train.py — same loop, bigger everything</span>
+          <div class="code-wrap"><span class="file">src/train.py: same loop, bigger everything</span>
           <pre><code data-lang="py"># pre-tokenized corpus, memory-mapped; sample random 256-token windows
 data = np.memmap("tinystories_train.bin", dtype=np.uint16, mode="r")
 ix = np.random.randint(0, len(data) - seq_len - 1, size=batch)
@@ -740,17 +750,17 @@ y = np.stack([data[i + 1 : i+seq_len + 1] for i in ix])   # targets = inputs shi
             <h3>Teaching it to follow, not just continue</h3>
             <p>The base model <em>continues</em> text; the <b>💬 Instruct</b> model at the top <em>follows an
               instruction</em>. Same 7M weights, further trained ("supervised fine-tuning") on a chat template
-              built from the stories themselves — pull content words out of a story, and the instruction becomes
+              built from the stories themselves: pull content words out of a story, and the instruction becomes
               "write a story using these words," with the story as the target answer:</p>
             <pre class="mini">User: Write a story using the words: dragon, cake, brave.
 Assistant: &lt;the story&gt;&lt;/s&gt;</pre>
             <p>The one genuinely new idea is <b>loss masking</b>. We do <em>not</em> want the model learning to
-              generate the instruction — only the response. So every target position inside the prompt is set to
+              generate the instruction, only the response. So every target position inside the prompt is set to
               <code>-100</code>, which PyTorch's cross-entropy silently ignores. The gradient only ever flows
-              from the answer. And — the theme of this whole project once more — <em>run.c is unchanged</em>: the
+              from the answer. And, the theme of this whole project once more, <em>run.c is unchanged</em>: the
               template is plain text, and BOS is still the stop token, so the model just learns to end its turn.</p>
           </header>
-          <div class="code-wrap"><span class="file">src/finetune.py — mask the prompt, train on the answer</span>
+          <div class="code-wrap"><span class="file">src/finetune.py: mask the prompt, train on the answer</span>
           <pre><code data-lang="py">full = prompt_ids + response_ids + [BOS]     # BOS = "end of turn"
 x, y = full[:-1], full[1:]
 # only positions predicting a RESPONSE token count toward the loss:
@@ -764,19 +774,19 @@ for i in range(len(prompt_ids) - 1):
             <span class="tag">21 · honesty</span>
             <h3>What 7M parameters can and can't do</h3>
             <p>Set expectations: this is not an assistant. It's a demonstration that the <em>mechanism</em> works.
-              Ask for a story and it obeys the <em>format</em> and <em>theme</em> every time — "about a robot"
+              Ask for a story and it obeys the <em>format</em> and <em>theme</em> every time: "about a robot"
               reliably gets you a robot. Injecting specific requested words is harder: common ones
-              (dog, park, friend) usually land, rare ones often don't — about <b id="wordrate">24%</b> of random
+              (dog, park, friend) usually land, rare ones often don't. About <b id="wordrate">24%</b> of random
               content words make it in (measured on held-out prompts). It has no facts, no reasoning, no memory
               across turns; it knows only the small world of TinyStories.</p>
             <p>Two things it does <em>not</em> use, that real instruct models do: <b>LoRA/PEFT</b> (we
               full-fine-tune all 7M weights because at this size it's free; large models train a small adapter
               instead), and <b>RLHF/DPO</b> (a second preference-alignment stage after SFT). SFT is step
-              one — where instruction-following comes from. That 24% is the number the next phase attacks.</p>
+              one, where instruction-following comes from. That 24% is the number the next phase attacks.</p>
           </header>
         </div>
 
-        <div class="phase-row"><span class="label">Alignment — Preference Optimization (DPO)</span></div>
+        <div class="phase-row"><span class="label">Alignment: Preference Optimization (DPO)</span></div>
 
         <div class="step" id="s22" data-n="22" data-phase="align">
           <header>
@@ -784,19 +794,19 @@ for i in range(len(prompt_ids) - 1):
             <h3>Teaching taste without a teacher</h3>
             <p>SFT taught the model to answer. Alignment teaches it which answer is <em>better</em>. Real RLHF
               collects pairs where a human picked the better of two responses; we can't hand-label thousands,
-              so we use a <span class="term" data-tip="Reinforcement Learning from AI Feedback: the preference label comes from a rule or a model, not a human. Here the rule is 'did the story use the requested words?' — the exact thing Phase 6 measured.">programmatic
-              judge</span> — which makes this <b>RLAIF</b>, but the optimizer downstream is identical.</p>
+              so we use a <span class="term" data-tip="Reinforcement Learning from AI Feedback: the preference label comes from a rule or a model, not a human. Here the rule is 'did the story use the requested words?', the exact thing Phase 6 measured.">programmatic
+              judge</span>, which makes this <b>RLAIF</b>, but the optimizer downstream is identical.</p>
             <p>The judge is Phase 6's weakness itself: <em>did the story use the requested words?</em> For each
               prompt we sample several completions <em>from the SFT model</em>, then pair the one using the most
               requested words (<b>chosen</b>) against the one using the fewest (<b>rejected</b>). The preferences
               are the model's own outputs, sorted by a rule it will now be trained to satisfy.</p>
           </header>
-          <div class="code-wrap"><span class="file">src/gen_prefs.py — the judge sorts the model's own samples</span>
+          <div class="code-wrap"><span class="file">src/gen_prefs.py: the judge sorts the model's own samples</span>
           <pre><code data-lang="py">completions = sample_k(model, prompt_ids, k=8)      # on-policy: the SFT model's own
 scored = [(sum(w in text.lower() for w in words), text)  # reward = # requested words present
           for text in completions]
 scored.sort()
-rejected, chosen = scored[0][1], scored[-1][1]      # worst vs best — a preference pair</code></pre></div>
+rejected, chosen = scored[0][1], scored[-1][1]      # worst vs best: a preference pair</code></pre></div>
         </div>
 
         <div class="step" id="s23" data-n="23" data-phase="align">
@@ -804,41 +814,41 @@ rejected, chosen = scored[0][1], scored[-1][1]      # worst vs best — a prefer
             <span class="tag">23 · DPO</span>
             <h3>Two models, one nudge</h3>
             <p>Classic RLHF trains a reward model then optimizes it with RL (PPO). <b>DPO</b> skips both: it
-              optimizes the preference pairs directly. Keep two copies of the SFT model — a trainable
+              optimizes the preference pairs directly. Keep two copies of the SFT model (a trainable
               <b>policy</b> and a <span class="term" data-tip="Without the frozen reference anchoring it, the policy could win every preference by collapsing into degenerate text. The reference keeps it a story.">frozen
-              <b>reference</b></span> — and push the policy to prefer chosen over rejected, but only <em>beyond</em>
+              <b>reference</b></span>) and push the policy to prefer chosen over rejected, but only <em>beyond</em>
               what the reference already prefers. One line of loss, no reward model, no RL loop.</p>
             <p>The result, both numbers measured identically on the same held-out prompts: word-inclusion
-              went from <b id="dpo-before">22%</b> (SFT) to <b id="dpo-after">45%</b> (DPO) — roughly doubled; the
+              went from <b id="dpo-before">22%</b> (SFT) to <b id="dpo-after">45%</b> (DPO), roughly doubled; the
               model learned to actually use the words it's given. The cost, visible in its output, is the
-              <span class="term" data-tip="Push alignment too hard and the policy games the reward — cramming or repeating the words at the expense of story quality. The reference model and a small beta are what hold that back.">alignment
+              <span class="term" data-tip="Push alignment too hard and the policy games the reward, cramming or repeating the words at the expense of story quality. The reference model and a small beta are what hold that back.">alignment
               tax</span>: reward-hacking that trades fluency for score. <em>Switch between 💬 Instruct and 🎯 Aligned
-              above and give both the same three words — the difference is DPO.</em></p>
+              above and give both the same three words. The difference is DPO.</em></p>
           </header>
-          <div class="code-wrap"><span class="file">src/dpo.py — the entire alignment objective</span>
+          <div class="code-wrap"><span class="file">src/dpo.py: the entire alignment objective</span>
           <pre><code data-lang="py">pol = logp(policy, chosen) - logp(policy, rejected)   # does the policy prefer chosen?
 ref = logp(ref,    chosen) - logp(ref,    rejected)   # did the frozen SFT model already?
 loss = -logsigmoid(beta * (pol - ref)).mean()         # reward only the NEW preference</code></pre></div>
         </div>
 
-        <div class="phase-row"><span class="label">Alignment II — the road not taken (PPO)</span></div>
+        <div class="phase-row"><span class="label">Alignment II: the road not taken (PPO)</span></div>
 
         <div class="step" id="s24" data-n="24" data-phase="ppo">
           <header>
             <span class="tag">24 · RLHF</span>
             <h3>The machinery DPO threw away</h3>
-            <p>DPO was invented to <em>replace</em> this. Before it, alignment meant <b>PPO</b> — reinforcement
+            <p>DPO was invented to <em>replace</em> this. Before it, alignment meant <b>PPO</b>: reinforcement
               learning, the InstructGPT recipe. Same reward, same frozen reference, but instead of one offline
               loss over preference pairs, PPO runs a full RL loop: the policy <em>generates</em> responses
               on-policy, a <span class="term" data-tip="A second head on the network that predicts, at each token, the expected future reward from that state. PPO needs it to compute advantages; DPO needs no such thing.">value
-              head (critic)</span> scores each state, GAE turns rewards into advantages, and a <b>clipped
-              surrogate</b> objective nudges the policy — clipping the probability ratio so no update moves too
+              head (critic)</span> scores each state, GAE turns rewards into advantages and a <b>clipped
+              surrogate</b> objective nudges the policy, clipping the probability ratio so no update moves too
               far (the "proximal" in PPO), with a per-token KL penalty back to the reference.</p>
-            <p>Five moving parts — rollouts, reward, critic, GAE, clipped+KL loss — regenerated every
+            <p>Five moving parts (rollouts, reward, critic, GAE, clipped+KL loss) regenerated every
               iteration, versus DPO's one loss over a fixed dataset. That extra machinery <em>is</em> the
               comparison.</p>
           </header>
-          <div class="code-wrap"><span class="file">src/ppo.py — the clipped surrogate (next to DPO's one line above)</span>
+          <div class="code-wrap"><span class="file">src/ppo.py: the clipped surrogate (next to DPO's one line above)</span>
           <pre><code data-lang="py">ratio = exp(new_logp - old_logp)              # how far the policy moved, per token
 clipped = clamp(ratio, 1-eps, 1+eps) * adv    # don't trust a big move too far
 loss = -min(ratio*adv, clipped).mean() \      # clipped policy gradient
@@ -851,37 +861,37 @@ loss = -min(ratio*adv, clipped).mean() \      # clipped policy gradient
             <h3>Two roads, same destination</h3>
             <p>Both start from the SFT model and chase the same reward. On the held-out word-inclusion test:
               SFT <b>22%</b> → DPO <b id="ppo-dpo">45%</b> → PPO <b id="ppo-after">~22%</b>. That's the honest
-              result: <b>our PPO didn't beat the baseline.</b> Not because PPO <em>can't</em> — it's the
-              algorithm behind ChatGPT — but because it's <em>finicky</em>. Stable settings (higher KL penalty)
-              barely moved; aggressive ones (higher LR, lower KL) destabilized — entropy blew up and reward
+              result: <b>our PPO didn't beat the baseline.</b> Not because PPO <em>can't</em> (it's the
+              algorithm behind ChatGPT) but because it's <em>finicky</em>. Stable settings (higher KL penalty)
+              barely moved; aggressive ones (higher LR, lower KL) destabilized: entropy blew up and reward
               <em>fell</em>. Across three configs, none cleanly beat DPO's robust <em>first-try</em> doubling.</p>
             <p>That contrast is the lesson: PPO's high-variance policy gradient vs DPO's low-variance
               contrastive loss is exactly why DPO became the default for straightforward preference alignment.
-              And the cost gap seals it — PPO needs a critic, GAE, reward shaping, KL/clip tuning, and fresh
+              And the cost gap seals it. PPO needs a critic, GAE, reward shaping, KL/clip tuning and fresh
               rollouts <em>every iteration</em> (minutes of generation), for a result DPO reached with one loss
-              over a static file. <em>Switch between 🎯 Aligned (DPO) and 🕹️ PPO on the same words — DPO
+              over a static file. <em>Switch between 🎯 Aligned (DPO) and 🕹️ PPO on the same words. DPO
               reliably works them in; our PPO, like SFT, often doesn't.</em></p>
           </header>
         </div>
 
-        <div class="phase-row"><span class="label">RLHF done right — reward model + RLOO</span></div>
+        <div class="phase-row"><span class="label">RLHF done right: reward model + RLOO</span></div>
 
         <div class="step" id="s26" data-n="26" data-phase="rlhf">
           <header>
             <span class="tag">26 · reward model</span>
             <h3>The piece both toys skipped</h3>
             <p>Why did PPO stall? Two missing pieces, and this phase adds them. First, a real <b>reward
-              model</b> — the middle stage of RLHF that DPO folds away and our PPO faked with the raw rule.
+              model</b>, the middle stage of RLHF that DPO folds away and our PPO faked with the raw rule.
               We train it on the <em>same preference pairs</em> DPO used (Phase 7's file), with the
-              <span class="term" data-tip="loss = -log sigmoid(r(chosen) - r(rejected)). The reward model learns to score the preferred response higher — the exact objective used to train reward models on human preferences.">Bradley-Terry
+              <span class="term" data-tip="loss = -log sigmoid(r(chosen) - r(rejected)). The reward model learns to score the preferred response higher, the exact objective used to train reward models on human preferences.">Bradley-Terry
               loss</span>: score the chosen response above the rejected one. The result is a <em>dense,
               smooth</em> reward for any response, a far better gradient signal than the rule's coarse
               0 / ⅓ / ⅔ / 1.</p>
             <p>Honest caveat, visible at this scale: our reward model only reaches
-              <b id="rm-acc">~61%</b> pairwise accuracy — a 7M linear-head probe on ~1k pairs is a weak judge.
+              <b id="rm-acc">~61%</b> pairwise accuracy; a 7M linear-head probe on ~1k pairs is a weak judge.
               RL is only ever as good as its reward model, and ours is the weak link.</p>
           </header>
-          <div class="code-wrap"><span class="file">src/rm.py — Bradley-Terry, the reward-model objective</span>
+          <div class="code-wrap"><span class="file">src/rm.py: Bradley-Terry, the reward-model objective</span>
           <pre><code data-lang="py">r_chosen   = reward_model(prompt + chosen)     # scalar score, mean-pooled hidden
 r_rejected = reward_model(prompt + rejected)
 loss = -logsigmoid(r_chosen - r_rejected).mean()   # chosen should score higher</code></pre></div>
@@ -894,19 +904,19 @@ loss = -logsigmoid(r_chosen - r_rejected).mean()   # chosen should score higher<
             <p>Second missing piece: a low-variance estimator. <b>RLOO</b> (REINFORCE Leave-One-Out) drops
               PPO's critic, GAE and clipping entirely. For each prompt it draws <em>k</em> samples and scores
               them with the reward model; the baseline for each sample is simply the
-              <span class="term" data-tip="Advantage = this sample's reward minus the mean reward of the OTHER k-1 samples for the same prompt. An unbiased, low-variance baseline — no value network to train.">mean
-              of the others</span>. That leave-one-out baseline is the whole variance-reduction trick — no
+              <span class="term" data-tip="Advantage = this sample's reward minus the mean reward of the OTHER k-1 samples for the same prompt. An unbiased, low-variance baseline, with no value network to train.">mean
+              of the others</span>. That leave-one-out baseline is the whole variance-reduction trick: no
               value network, no GAE, no clip. One REINFORCE update per rollout, KL-tethered to the reference.</p>
             <p>First attempt, against the ~61% reward model above. RLOO's machinery worked
-              <em>perfectly</em> — the reward-model score <b>tripled</b> (−0.6 → +2.4) and KL to the reference
+              <em>perfectly</em>: the reward-model score <b>tripled</b> (−0.6 → +2.4) and KL to the reference
               <b>exploded 9×</b> as the policy chased it. But word-inclusion barely budged (<b>22% → 24%</b>).
-              The policy <b>hacked the weak reward model</b> — exploiting its errors instead of using the words.
+              The policy <b>hacked the weak reward model</b>, exploiting its errors instead of using the words.
               That's <b>reward-model overoptimization</b> (Goodhart's law: "when a measure becomes a target, it
               ceases to be a good measure"), the central pitfall of RLHF. The reward model, it turned out,
-              didn't even score a 2-word story above a 1-word one — so "maximize it" didn't mean "use the
+              didn't even score a 2-word story above a 1-word one, so "maximize it" didn't mean "use the
               words."</p>
           </header>
-          <div class="code-wrap"><span class="file">src/rloo.py — the leave-one-out advantage (no critic)</span>
+          <div class="code-wrap"><span class="file">src/rloo.py: the leave-one-out advantage (no critic)</span>
           <pre><code data-lang="py">reward = reward_model(samples) - kl_coef * kl_to_ref      # k samples for this prompt
 baseline = (reward.sum() - reward) / (k - 1)             # mean of the OTHER k-1
 advantage = reward - baseline                            # unbiased, low-variance
@@ -917,22 +927,22 @@ loss = -(advantage.detach() * logp_policy).mean()       # plain REINFORCE, no cl
           <header>
             <span class="tag">28 · the fix</span>
             <h3>Fix the reward, and it climbs</h3>
-            <p>RL is only as good as its reward model — so we built a better one. The weak RM never learned to
+            <p>RL is only as good as its reward model, so we built a better one. The weak RM never learned to
               <em>grade</em> because its pairs were all-or-none (chosen had every word, rejected had none); it
               never saw "2 words vs 1." The fix is <b>graded pairs</b>, made for free from the corpus: hold the
-              story fixed and vary the <em>request</em> — ask for words the story happens to contain (3/3
+              story fixed and vary the <em>request</em>: ask for words the story happens to contain (3/3
               satisfied) vs words it doesn't (1/3). Now the reward model learns to rank by <em>how many</em>
-              requested words appear — and on real generations it does: 2-word stories now score above 1-word
+              requested words appear, and on real generations it does: 2-word stories now score above 1-word
               above 0.</p>
-            <p>Same RLOO, same everything — only the reward model changed. And the identical algorithm that
+            <p>Same RLOO, same everything; only the reward model changed. And the identical algorithm that
               <em>hacked</em> now <b>climbs</b>: word-inclusion <b>22% → <b id="rloo2-after">32%</b></b>, with KL
-              <em>bounded</em> (~4, not 9) — it climbed the reward in-distribution, genuinely using more words.
+              <em>bounded</em> (~4, not 9). It climbed the reward in-distribution, genuinely using more words.
               The full arc: SFT <b>22%</b> → PPO <b>22%</b> → RLOO/weak-RM <b>24%</b> (hacked) → RLOO/strong-RM
-              <b>32%</b> (climbed) → DPO <b>45%</b>. RL from a reward model <em>works</em> — when the reward
+              <b>32%</b> (climbed) → DPO <b>45%</b>. RL from a reward model <em>works</em>, when the reward
               model is good. And DPO's quiet advantage endures: no reward model to get right in the first place.
-              <em>🎁 RLOO above is this model — switch it against 🕹️ PPO on the same words.</em></p>
+              <em>🎁 RLOO above is this model. Switch it against 🕹️ PPO on the same words.</em></p>
           </header>
-          <div class="code-wrap"><span class="file">src/rm.py — graded pairs: vary the request, not the response</span>
+          <div class="code-wrap"><span class="file">src/rm.py, graded pairs: vary the request, not the response</span>
           <pre><code data-lang="py"># same story A; make c of the 3 requested words ones that A actually contains
 request(c) = (c words drawn from A) + (3 - c words NOT in A)
 chosen   = request(c_hi)     # more requested words present
@@ -945,33 +955,33 @@ rejected = request(c_lo)     # fewer present  ->  the RM learns to grade by coun
           <header>
             <span class="tag">29 · the floor</span>
             <h3>Every benchmark has a floor</h3>
-            <p>"45%" invites an obvious complaint: fewer than half the requested words show up — that's not a
+            <p>"45%" invites an obvious complaint: fewer than half the requested words show up, and that's not a
               good assistant. Fair. But before you accept <em>or</em> dismiss a number, ask what it scores when
               the model <em>ignores the instruction entirely</em>. TinyStories has a small, repetitive
               vocabulary, so a story that never read the request still contains <b>~11%</b> of the requested
               words by pure coincidence. That's the floor, and it takes one line to measure: score each story
               against a <em>different</em> prompt's words.</p>
-            <p>Subtract it and the picture inverts. SFT scores 19.6% against a 10.4% floor — only
+            <p>Subtract it and the picture inverts. SFT scores 19.6% against a 10.4% floor: only
               <b>+9 points</b> of real instruction-following; a third of its headline was luck. DPO scores 43.3%
-              against 11.7% — <b>+32 points</b>. So the honest comparison was never 22% → 45% (a 2× bump); it's
+              against 11.7%, <b>+32 points</b>. So the honest comparison was never 22% → 45% (a 2× bump); it's
               <b>9 → 32, about 3.4×</b>. The raw numbers were <em>understating</em> alignment.</p>
             <p>The metric is also harsher than it sounds. The requested words are picked to be
               <em>distinctive</em>, which means <b>78%</b> of them are rare. Split it out: on common words DPO
-              hits <b>60%</b>; on rare words <b>39%</b> — up from SFT's 13%, nearly 3×. The headline is dominated
+              hits <b>60%</b>; on rare words <b>39%</b>, up from SFT's 13%, nearly 3×. The headline is dominated
               by the hardest version of the task, and a 7M model with a 4096-token vocabulary may not reliably
               <em>spell</em> a rare word at all. Some of that miss rate is a
-              <span class="term" data-tip="A rare word tokenizes into several BPE pieces the model seldom emits in sequence. No amount of alignment fixes that — it's a capacity and vocabulary limit.">capacity
+              <span class="term" data-tip="A rare word tokenizes into several BPE pieces the model seldom emits in sequence. No amount of alignment fixes that; it's a capacity and vocabulary limit.">capacity
               ceiling</span>, not an alignment failure.</p>
             <p>And one caveat aimed at ourselves: at n=240 the standard error is <b>±3 points</b>. DPO's 45% vs
-              RLOO's 32% is a real gap (~4 s.e.), but "SFT 22% vs PPO 22%" is just noise agreeing with noise —
-              read no precision into it. <em>The lesson outlives the number: know your floor, report the lift,
+              RLOO's 32% is a real gap (~4 s.e.), but "SFT 22% vs PPO 22%" is just noise agreeing with noise.
+              Read no precision into it. <em>The lesson outlives the number: know your floor, report the lift,
               and know which part of the task your metric is actually measuring.</em></p>
           </header>
-          <div class="code-wrap"><span class="file">the control — same stories, shuffled requests</span>
+          <div class="code-wrap"><span class="file">the control: same stories, shuffled requests</span>
           <pre><code data-lang="py"># real:  does story i contain the words asked of story i?
 hit    = sum(w in gens[i] for w in reqs[i])
 # floor: does story i contain the words asked of some OTHER story?
-chance = sum(w in gens[i] for w in reqs[(i + 7) % n])   # ~11% — pure coincidence
+chance = sum(w in gens[i] for w in reqs[(i + 7) % n])   # ~11%, pure coincidence
 
 lift = hit/tot - chance/tot      # <- the only number that means anything</code></pre></div>
         </div>
@@ -979,11 +989,12 @@ lift = hit/tot - chance/tot      # <- the only number that means anything</code>
       </div>
 
       <footer>
-        A Llama-style transformer written from scratch in C — pretrained on TinyStories with a from-scratch
-        BPE tokenizer, instruction-tuned with loss masking, exported to a flat binary, int8-quantized, and
-        running live in this page via WebAssembly.<br>
+        A Llama-style transformer written from scratch in C. It was pretrained on TinyStories with a from-scratch
+        BPE tokenizer, instruction-tuned with loss masking, exported to a flat binary and int8-quantized, and it now
+        runs live in this page via WebAssembly.<br>
         Inspired by Andrej Karpathy's <a href="https://github.com/karpathy/llama2.c">llama2.c</a>.
-        No frameworks, no inference libraries, no API — the fire is running on your CPU.
+        No frameworks, no inference libraries, no API: the fire is running on your CPU.<br>
+        <span class="hub"><img src="badge.svg" alt="" width="13" height="16"> <a href="https://mikebertin.github.io/">More builds by Mike Bertin</a></span>
       </footer>
     </main>
   </div>
@@ -1002,8 +1013,8 @@ lift = hit/tot - chance/tot      # <- the only number that means anything</code>
         engine: "runq.c · 7.2M params · int8 · DPO-aligned",
         model: "models/tinystories_aligned_q80.bin", tok: "models/tinystories_tokenizer.bin",
         size: "8 MB", temp: 0.7, prompt: "Write a story using the words: dragon, cake, brave.",
-        placeholder: "type an instruction — e.g. Write a story using the words: …",
-        // same chat template as the SFT model — DPO only nudged the weights,
+        placeholder: "type an instruction, e.g. Write a story using the words: …",
+        // same chat template as the SFT model: DPO only nudged the weights,
         // it didn't change the format. Compare it against 💬 Instruct on the
         // SAME words: alignment should make more of them actually appear.
         wrap: p => "User: " + p + "\nAssistant:",
@@ -1016,7 +1027,7 @@ lift = hit/tot - chance/tot      # <- the only number that means anything</code>
         engine: "runq.c · 7.2M params · int8 · instruct-tuned (SFT only)",
         model: "models/tinystories_instruct_q80.bin", tok: "models/tinystories_tokenizer.bin",
         size: "8 MB", temp: 0.7, prompt: "Write a story using the words: dragon, cake, brave.",
-        placeholder: "type an instruction — e.g. Write a story using the words: …",
+        placeholder: "type an instruction, e.g. Write a story using the words: …",
         // the chat template the model was fine-tuned on; BOS still ends the turn
         wrap: p => "User: " + p + "\nAssistant:",
         presets: ["Write a story using the words: dragon, cake, brave.",
@@ -1028,9 +1039,9 @@ lift = hit/tot - chance/tot      # <- the only number that means anything</code>
         engine: "runq.c · 7.2M params · int8 · RLOO + graded reward model",
         model: "models/tinystories_rloo_q80.bin", tok: "models/tinystories_tokenizer.bin",
         size: "8 MB", temp: 0.7, prompt: "Write a story using the words: dragon, cake, brave.",
-        placeholder: "type an instruction — e.g. Write a story using the words: …",
+        placeholder: "type an instruction, e.g. Write a story using the words: …",
         // RL done right: a learned reward model + a low-variance leave-one-out
-        // estimator — the two things naive PPO (🕹️) lacked. Same chat template.
+        // estimator, the two things naive PPO (🕹️) lacked. Same chat template.
         wrap: p => "User: " + p + "\nAssistant:",
         presets: ["Write a story using the words: dragon, cake, brave.",
                   "Write a story using the words: moon, boat, secret.",
@@ -1041,9 +1052,9 @@ lift = hit/tot - chance/tot      # <- the only number that means anything</code>
         engine: "runq.c · 7.2M params · int8 · PPO-aligned (RLHF)",
         model: "models/tinystories_ppo_q80.bin", tok: "models/tinystories_tokenizer.bin",
         size: "8 MB", temp: 0.7, prompt: "Write a story using the words: dragon, cake, brave.",
-        placeholder: "type an instruction — e.g. Write a story using the words: …",
+        placeholder: "type an instruction, e.g. Write a story using the words: …",
         // same SFT chat template; PPO (like DPO) only moved the weights. This
-        // model was aligned by reinforcement learning instead of DPO — compare
+        // model was aligned by reinforcement learning instead of DPO. Compare
         // the two on the same words to feel what the algorithm choice buys you.
         wrap: p => "User: " + p + "\nAssistant:",
         presets: ["Write a story using the words: dragon, cake, brave.",
@@ -1055,7 +1066,7 @@ lift = hit/tot - chance/tot      # <- the only number that means anything</code>
         engine: "runq.c · 7.2M params · int8 · BPE-4096",
         model: "models/tinystories_q80.bin", tok: "models/tinystories_tokenizer.bin",
         size: "8 MB", temp: 0.85, prompt: "Once upon a time",
-        placeholder: "type a prompt — the model continues it",
+        placeholder: "type a prompt and the model continues it",
         presets: ["Once upon a time", "One day, a little girl", "Tom and Lily went to the",
                   "The dragon was very", ""],
       },
@@ -1063,7 +1074,7 @@ lift = hit/tot - chance/tot      # <- the only number that means anything</code>
         engine: "runq.c · 2.26M params · int8 · byte-level",
         model: "models/shakespeare_q80.bin", tok: "models/byte_tokenizer.bin",
         size: "2.4 MB", temp: 0.8, prompt: "ROMEO:",
-        placeholder: "type a prompt — speaker names work best",
+        placeholder: "type a prompt (speaker names work best)",
         presets: ["ROMEO:", "JULIET:", "KING RICHARD II:", "First Citizen:", ""],
       },
     };
@@ -1074,7 +1085,7 @@ lift = hit/tot - chance/tot      # <- the only number that means anything</code>
       box.innerHTML = "";
       for (const p of MODELS[key].presets) {
         const b = document.createElement("button");
-        b.textContent = p === "" ? "(no prompt — let it invent)" : p;
+        b.textContent = p === "" ? "(no prompt: let it invent)" : p;
         b.onclick = () => { promptEl.value = p; if (ready) generate(); };
         box.appendChild(b);
       }
@@ -1155,7 +1166,11 @@ lift = hit/tot - chance/tot      # <- the only number that means anything</code>
         promDone    = M.cwrap("prom_is_done", "number", []);
         promReload  = M.cwrap("prom_reload", "number", ["string", "string"]);
         await loadModel(curModel);
-        generate();                       // fire a first sample automatically
+        // fire a first sample automatically, unless the reader asked for
+        // reduced motion: then the typewriter waits for the generate button
+        if (matchMedia("(prefers-reduced-motion: reduce)").matches)
+          out.textContent = "Ready. Press ▶ generate to sample a story.";
+        else generate();
         document.querySelectorAll("#modelsel button").forEach(b =>
           b.onclick = async () => {
             if (b.dataset.m === curModel || !M) return;
@@ -1173,7 +1188,7 @@ lift = hit/tot - chance/tot      # <- the only number that means anything</code>
     // The engine is far faster than a readable typewriter, so we PACE the
     // display at DISPLAY_RATE tok/s on the wall clock. Pacing by elapsed time
     // (not per-frame counts) means a throttled rAF simply catches up in a
-    // burst instead of crawling — the pane stays honest even when hidden.
+    // burst instead of crawling, so the pane stays honest even when hidden.
     const DISPLAY_RATE = 100;
     let engineTps = 0, running = false, raf = 0;
     function generate() {

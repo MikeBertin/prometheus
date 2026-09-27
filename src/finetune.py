@@ -1,32 +1,32 @@
 """
-PROMETHEUS — finetune.py
+PROMETHEUS: finetune.py
 
-Instruction fine-tuning (SFT) — turn the TinyStories *base* model into a
+Instruction fine-tuning (SFT): turn the TinyStories *base* model into a
 single-turn instruct model that follows a prompt instead of just continuing
 text. Three real techniques, at 7M-param scale:
 
-  1. A CHAT TEMPLATE (plain text — no new tokens, so run.c is unchanged):
+  1. A CHAT TEMPLATE (plain text, no new tokens, so run.c is unchanged):
          <s>User: <instruction>
          Assistant: <response></s>
      BOS (id 1) both opens the example and is the stop token run.c already
      halts on, so the model learns to end its turn.
 
-  2. LOSS MASKING — we only train on the *response* tokens. The instruction
+  2. LOSS MASKING: we only train on the *response* tokens. The instruction
      is context, not something to learn to generate, so its target positions
      are set to -100 (PyTorch's cross_entropy ignore_index). Without this the
      model would waste capacity learning to parrot instructions.
 
-  3. SFT FROM THE PRETRAINED BASE — we start from models/tinystories.pt, not
+  3. SFT FROM THE PRETRAINED BASE: we start from models/tinystories.pt, not
      random weights. The base already knows how to write stories; fine-tuning
      only teaches it the *format* of following an instruction. Hence a low LR
      and a couple of epochs, not a full training run.
 
 The instruction data is SYNTHESIZED from the TinyStories corpus itself:
 extract content words from a story, and the instruction becomes "write a
-story using these words" — with the story as the target response. That makes
+story using these words", with the story as the target response. That makes
 the task in-domain AND verifiable (does the output contain the words?).
 
-We full-fine-tune all 7M parameters — trivial at this scale. Real instruct
+We full-fine-tune all 7M parameters: trivial at this scale. Real instruct
 models use LoRA/PEFT to update a small adapter instead; noted, not needed here.
 
   .venv/bin/python src/finetune.py                 # full run
@@ -126,7 +126,7 @@ def build_examples(stories, tok, seq_len, max_examples):
 @torch.no_grad()
 def generate_response(model, tok, instruction, device, max_new=200, temperature=0.7):
     """Prompt the model with the chat template and stop at BOS."""
-    was_training = model.training   # restore, don't force-.train() — a frozen
+    was_training = model.training   # restore, don't force-.train(): a frozen
     model.eval()                    # reference passed in must stay frozen
     prompt = f"User: {instruction}\nAssistant:"
     ids = tok.encode(prompt, bos=True)

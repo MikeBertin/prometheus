@@ -1,9 +1,9 @@
 """
-PROMETHEUS — capture.py
+PROMETHEUS: capture.py
 
 Captures the repo's social assets from the real running page:
-  web/og.png   — 1200x630 OG card, rendered from web/og.html
-  web/demo.gif — the live terminal actually generating (frames -> ffmpeg)
+  web/og.png:    1200x630 OG card, rendered from web/og.html
+  web/demo.gif:  the live terminal actually generating (frames -> ffmpeg)
 
 Usage:  .venv/bin/python scripts/capture.py   (needs the local server on :8123
         and ffmpeg on PATH; `make web` first so the wasm build is current)

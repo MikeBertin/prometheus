@@ -1,7 +1,7 @@
 """
-PROMETHEUS — model.py
+PROMETHEUS: model.py
 
-The Llama-2 style transformer in PyTorch — the *training-time twin* of
+The Llama-2 style transformer in PyTorch: the *training-time twin* of
 src/run.c. Every architectural choice here mirrors the C forward pass exactly,
 because the whole point is that weights trained here run unmodified there:
 
@@ -36,7 +36,7 @@ class ModelArgs:
 
 
 class RMSNorm(nn.Module):
-    """x / rms(x) * weight — identical math to run.c rmsnorm()."""
+    """x / rms(x) * weight: identical math to run.c rmsnorm()."""
     def __init__(self, dim: int, eps: float):
         super().__init__()
         self.eps = eps
@@ -50,7 +50,7 @@ class RMSNorm(nn.Module):
 # ---------------------------------------------------------------------------
 # RoPE. We precompute the complex rotations e^{i * pos * freq} and multiply
 # each ADJACENT pair (x[2k], x[2k+1]) viewed as a complex number. This is the
-# same pairing run.c uses in its (i, i+1) loop — NOT the "rotate half"
+# same pairing run.c uses in its (i, i+1) loop, NOT the "rotate half"
 # convention used by HF Llama, which pairs (x[k], x[k + d/2]).
 # ---------------------------------------------------------------------------
 def precompute_freqs_cis(head_size: int, seq_len: int, base: float = 10000.0):
@@ -111,7 +111,7 @@ class Attention(nn.Module):
 
 
 class FeedForward(nn.Module):
-    """SwiGLU: w2( silu(w1 x) * (w3 x) ) — run.c's hb/hb2 loop."""
+    """SwiGLU: w2( silu(w1 x) * (w3 x) ), as in run.c's hb/hb2 loop."""
     def __init__(self, args: ModelArgs):
         super().__init__()
         self.w1 = nn.Linear(args.dim, args.hidden_dim, bias=False)  # gate

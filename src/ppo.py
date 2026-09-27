@@ -1,7 +1,7 @@
 """
-PROMETHEUS — ppo.py  (Phase 8: the RLHF path DPO shortcuts)
+PROMETHEUS: ppo.py  (Phase 8: the RLHF path DPO shortcuts)
 
-Proximal Policy Optimization — the classic RLHF algorithm (InstructGPT), here
+Proximal Policy Optimization: the classic RLHF algorithm (InstructGPT), here
 as a toy so you can hold it next to dpo.py and SEE the difference.
 
 Same goal as Phase 7 (get the model to use the requested words), same frozen
@@ -16,21 +16,21 @@ reference anchor. What changes is EVERYTHING about how we get there:
   trains in ~90s                   generates fresh samples every iteration
 
 Both use the SAME programmatic reward (fraction of requested words present).
-Real RLHF replaces that rule with a REWARD MODEL trained on human preferences —
+Real RLHF replaces that rule with a REWARD MODEL trained on human preferences,
 the one piece both our toys skip. What PPO adds over DPO is the RL itself:
 
-  1. ROLLOUT — the current policy generates responses; we record each token's
+  1. ROLLOUT: the current policy generates responses; we record each token's
      log-prob (the "old" policy) and the critic's value estimate.
-  2. REWARD  — score each response (word inclusion), and shape a per-token
+  2. REWARD:  score each response (word inclusion), and shape a per-token
      reward = terminal reward at the end MINUS a KL penalty to the reference
      at every token (so the policy can't wander far from the SFT model).
-  3. GAE     — the value head turns rewards into per-token ADVANTAGES.
-  4. UPDATE  — for K epochs, the CLIPPED SURROGATE objective nudges the policy
+  3. GAE:     the value head turns rewards into per-token ADVANTAGES.
+  4. UPDATE:  for K epochs, the CLIPPED SURROGATE objective nudges the policy
      toward high-advantage actions, but clips the probability ratio so no
      single update moves too far (the "proximal" in PPO).
 
 The critic is training-only; export saves just the policy, so run.c/runq.c run
-it unchanged — zero C changes, same as every phase.
+it unchanged: zero C changes, same as every phase.
 
     .venv/bin/python src/ppo.py --iters 40
 """
@@ -62,7 +62,7 @@ def load_policy(path, device, train):
 
 
 # ---------------------------------------------------------------------------
-# 1. ROLLOUT — the policy generates, we record log-probs and values
+# 1. ROLLOUT: the policy generates, we record log-probs and values
 # ---------------------------------------------------------------------------
 @torch.no_grad()
 def rollout(policy, value_head, prompt_ids, words, tok, device, B, max_new):
@@ -71,7 +71,7 @@ def rollout(policy, value_head, prompt_ids, words, tok, device, B, max_new):
     keeps positions aligned (no padding during generation).
 
     We sample from the policy's TRUE distribution (no temperature) so the
-    recorded log-probs match what eval_actions recomputes — the PPO ratio must
+    recorded log-probs match what eval_actions recomputes, as the PPO ratio must
     start at exactly 1 in the first epoch. Exploration comes from the softmax
     itself, not a temperature knob."""
     policy.eval()
@@ -137,7 +137,7 @@ def shape_and_gae(traj, ref_logp, kl_coef, gamma, lam):
 
 
 # ---------------------------------------------------------------------------
-# 3. EVAL ACTIONS — recompute logp / value / entropy for a padded minibatch
+# 3. EVAL ACTIONS: recompute logp / value / entropy for a padded minibatch
 # ---------------------------------------------------------------------------
 def eval_actions(policy, value_head, batch, device):
     """For a list of trajectories, forward the full sequences once and gather,

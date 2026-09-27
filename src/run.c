@@ -1,12 +1,12 @@
 /* ============================================================================
- * PROMETHEUS — run.c
+ * PROMETHEUS: run.c
  * A Llama-2 style transformer, forward pass only, in pure C.
  *
- * "I gave them fire." — Prometheus, Aeschylus
+ * "I gave them fire." (Prometheus, Aeschylus)
  *
  * This is an *inference* engine. It loads a pre-trained checkpoint (a flat
  * file of float32 weights) and a tokenizer, then autoregressively generates
- * text one token at a time. There is no autograd, no training — every line
+ * text one token at a time. There is no autograd, no training. Every line
  * here is the math that turns a sequence of token IDs into a probability
  * distribution over the next token.
  *
@@ -35,7 +35,7 @@
 #include <unistd.h>
 
 /* ----------------------------------------------------------------------------
- * 1. THE MODEL: config, weights, and per-step activation buffers
+ * 1. THE MODEL: config, weights and per-step activation buffers
  * -------------------------------------------------------------------------- */
 
 /* The hyperparameters of the network. These 7 ints are the file header. */
@@ -52,7 +52,7 @@ typedef struct {
 /* Pointers into the memory-mapped weight blob. Nothing is copied: each field
  * points at the right offset inside the mmap'd file. */
 typedef struct {
-    float* token_embedding_table; // (vocab_size, dim) — row per token
+    float* token_embedding_table; // (vocab_size, dim), row per token
     // attention RMSNorm gains
     float* rms_att_weight;        // (n_layers, dim)
     // attention projection matrices
@@ -68,7 +68,7 @@ typedef struct {
     float* w3;                    // (n_layers, hidden_dim, dim)  up
     // final RMSNorm + classifier
     float* rms_final_weight;      // (dim,)
-    float* wcls;                  // (vocab_size, dim) — often tied to embeddings
+    float* wcls;                  // (vocab_size, dim), often tied to embeddings
 } TransformerWeights;
 
 /* Scratch buffers reused every forward step, plus the KV cache. The KV cache
@@ -76,7 +76,7 @@ typedef struct {
  * positions are computed once and remembered, so step t only does O(t) work
  * for attention instead of recomputing the whole prefix. */
 typedef struct {
-    float* x;      // (dim,)  the residual stream — the "thought vector"
+    float* x;      // (dim,)  the residual stream, the "thought vector"
     float* xb;     // (dim,)  a normalized/temp copy of x
     float* xb2;    // (dim,)  another temp
     float* hb;     // (hidden_dim,)  ffn hidden buffer 1
@@ -128,7 +128,7 @@ void free_run_state(RunState* s) {
 /* Lay the weight pointers over the raw float blob. The order here MUST match
  * the order the Python exporter wrote them. This is the legacy llama2.c
  * layout, which also stores precomputed RoPE tables we skip (we recompute
- * RoPE on the fly below — it's cheap and keeps the code self-contained). */
+ * RoPE on the fly below; it's cheap and keeps the code self-contained). */
 void memory_map_weights(TransformerWeights* w, Config* p, float* ptr, int shared_weights) {
     int head_size = p->dim / p->n_heads;
     unsigned long long n_layers = p->n_layers;
@@ -192,7 +192,7 @@ void free_transformer(Transformer* t) {
  * -------------------------------------------------------------------------- */
 
 /* RMSNorm: normalize a vector by its root-mean-square, then scale per-element.
- * Llama uses this instead of LayerNorm — no mean subtraction, no bias.
+ * Llama uses this instead of LayerNorm: no mean subtraction, no bias.
  *   y_i = x_i / sqrt(mean(x^2) + eps) * weight_i
  * It keeps the residual stream at a stable scale before each sub-layer. */
 void rmsnorm(float* o, float* x, float* weight, int size) {
@@ -214,11 +214,11 @@ void softmax(float* x, int size) {
 }
 
 /* Matrix-vector product: out = W @ x, where W is (d, n) row-major and x is (n,).
- * This is the single hottest operation in the whole network — every projection
+ * This is the single hottest operation in the whole network: every projection
  * and the final classifier is a matmul. Each output row is a dot product.
  * The rows are independent, so this loop is embarrassingly parallel: the pragma
  * below splits it across cores IF you compile with -fopenmp. The default build
- * doesn't, so it's a no-op there — left in as the one honest place to add it. */
+ * doesn't, so it's a no-op there, left in as the one honest place to add it. */
 void matmul(float* out, float* x, float* w, int n, int d) {
     #pragma omp parallel for
     for (int i = 0; i < d; i++) {
@@ -230,7 +230,7 @@ void matmul(float* out, float* x, float* w, int n, int d) {
 }
 
 /* ----------------------------------------------------------------------------
- * 3. THE FORWARD PASS — one token in, a vector of logits out
+ * 3. THE FORWARD PASS: one token in, a vector of logits out
  * -------------------------------------------------------------------------- */
 float* forward(Transformer* transformer, int token, int pos) {
     Config* p = &transformer->config;
@@ -329,7 +329,7 @@ float* forward(Transformer* transformer, int token, int pos) {
 }
 
 /* ----------------------------------------------------------------------------
- * 4. THE TOKENIZER — text <-> token ids (byte-level BPE, Llama/sentencepiece)
+ * 4. THE TOKENIZER: text <-> token ids (byte-level BPE, Llama/sentencepiece)
  * -------------------------------------------------------------------------- */
 
 typedef struct { char* str; int id; } TokenIndex;
@@ -376,7 +376,7 @@ void free_tokenizer(Tokenizer* t) {
 }
 
 /* Map a token id back to its printable string. Llama emits a leading space on
- * the first real token and encodes raw bytes as "<0xNN>" — handle both. */
+ * the first real token and encodes raw bytes as "<0xNN>"; handle both. */
 char* decode(Tokenizer* t, int prev_token, int token) {
     char* piece = t->vocab[token];
     if (prev_token == 1 && piece[0] == ' ') piece++; // strip BOS-leading space
@@ -388,7 +388,7 @@ char* decode(Tokenizer* t, int prev_token, int token) {
 
 void safe_printf(char* piece) {
     if (piece == NULL || piece[0] == '\0') return;
-    if (piece[1] == '\0') { // single byte — skip unprintable control chars
+    if (piece[1] == '\0') { // single byte: skip unprintable control chars
         unsigned char b = piece[0];
         if (!(isprint(b) || isspace(b))) return;
     }
@@ -472,7 +472,7 @@ void encode(Tokenizer* t, char* text, int8_t bos, int8_t eos, int* tokens, int* 
 }
 
 /* ----------------------------------------------------------------------------
- * 5. THE SAMPLER — turn logits into the next token id
+ * 5. THE SAMPLER: turn logits into the next token id
  * -------------------------------------------------------------------------- */
 
 typedef struct { float prob; int index; } ProbIndex;
@@ -508,7 +508,7 @@ int compare_probindex(const void* a, const void* b) {
 }
 
 /* Top-p (nucleus) sampling: keep the smallest set of tokens whose cumulative
- * probability exceeds p, renormalize, and sample from just those. Cuts the
+ * probability exceeds p, renormalize and sample from just those. Cuts the
  * long tail of unlikely tokens without a hard top-k cutoff. */
 int sample_topp(float* probabilities, int n, float topp, ProbIndex* probindex, float coin) {
     int n0 = 0;
@@ -563,7 +563,7 @@ int sample(Sampler* s, float* logits) {
 }
 
 /* ----------------------------------------------------------------------------
- * 6. THE GENERATION LOOP — prompt in, stream tokens out
+ * 6. THE GENERATION LOOP: prompt in, stream tokens out
  * -------------------------------------------------------------------------- */
 
 long time_in_ms(void) {

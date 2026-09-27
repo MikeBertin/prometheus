@@ -1,8 +1,8 @@
 name: Deploy demo to GitHub Pages
 
-# Publishes the web/ folder — the live in-browser generation demo (run.c
-# compiled to WASM + the trained weights) plus the annotated-code walkthrough
-# — to GitHub Pages on every push to main.
+# Publishes the web/ folder to GitHub Pages on every push to main. That's
+# the live in-browser generation demo (run.c compiled to WASM + the trained
+# weights) plus the annotated-code walkthrough.
 
 on:
   push:
